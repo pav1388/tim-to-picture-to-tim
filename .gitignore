@@ -1,7 +1,8 @@
 qt-5.6.3-static
+qt-5.6.3-static.7z
 releases
-*.7z
-*.zip
+_to-one-txt.bat
+_combined_files.txt
 
 # CMake / build output
 build/
@@ -29,6 +30,7 @@ Makefile
 
 # Runtime settings
 ttptt-settings.ini
+ttptt-settings.json
 *.log
 
 # OS

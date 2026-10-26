@@ -6,6 +6,12 @@
 
 Разработка: часть кода подготовлена с помощью ИИ-ассистента (DeepSeek).
 
+## Скриншоты
+<p align="center">
+  <img src="docs/screenshot-main.png" alt="Светлая тема" width="250">
+  <img src="docs/screenshot-dark.png" alt="Тёмная тема" width="250">
+</p>
+
 ## Возможности
 
 - Поддержка 4/8/16/24-битных TIM
