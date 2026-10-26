@@ -1,0 +1,8 @@
+* text=auto
+
+*.tim    binary
+*.png    binary
+*.bmp    binary
+*.act    binary
+*.ico    binary
+*.ttptt  text

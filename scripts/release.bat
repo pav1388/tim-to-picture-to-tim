@@ -1,0 +1,115 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+cd /d "%~dp0"
+
+for %%i in ("%~dp0..") do set "PROJECT_ROOT=%%~fi"
+set "SRC_EXE=%PROJECT_ROOT%\build\ttptt.exe"
+set "SRC_README=%PROJECT_ROOT%\README.md"
+set "SRC_SAMPLES=%PROJECT_ROOT%\sample_tim"
+set "RELEASE_ROOT=%PROJECT_ROOT%\releases"
+
+REM --- read version (first line, spaces stripped) ---
+if not exist "%PROJECT_ROOT%\version.txt" (
+    echo ERROR: version.txt not found at "%PROJECT_ROOT%"
+    pause & exit /b 1
+)
+set "VERSION="
+set /p VERSION=<"%PROJECT_ROOT%\version.txt"
+set "VERSION=%VERSION: =%"
+if "%VERSION%"=="" (
+    echo ERROR: version.txt is empty.
+    pause & exit /b 1
+)
+
+set "NAME=tim-to-png-to-tim-v%VERSION%-win32-static"
+set "DEST=%RELEASE_ROOT%\%NAME%"
+set "ZIP_PATH=%RELEASE_ROOT%\%NAME%.zip"
+
+REM --- sanity ---
+if not exist "%SRC_EXE%" (
+    echo ERROR: %SRC_EXE% not found. Build first ^(scripts\build.bat^).
+    pause & exit /b 1
+)
+if not exist "%SRC_README%" (
+    echo ERROR: %SRC_README% not found.
+    pause & exit /b 1
+)
+
+REM --- create release dir ---
+if not exist "%RELEASE_ROOT%" mkdir "%RELEASE_ROOT%"
+if not exist "%DEST%" mkdir "%DEST%"
+
+REM --- ttptt.exe (always overwrite) ---
+copy /Y "%SRC_EXE%" "%DEST%\ttptt.exe" >nul
+if errorlevel 1 (
+    echo ERROR: failed to copy ttptt.exe
+    pause & exit /b 1
+)
+echo [ok] ttptt.exe
+
+REM --- README.md (always overwrite) ---
+copy /Y "%SRC_README%" "%DEST%\README.md" >nul
+if errorlevel 1 (
+    echo ERROR: failed to copy README.md
+    pause & exit /b 1
+)
+echo [ok] README.md
+
+REM --- sample_tim (skip existing files by name, copy new ones) ---
+if exist "%SRC_SAMPLES%" (
+    if not exist "%DEST%\sample_tim" mkdir "%DEST%\sample_tim"
+    REM /XC /XN /XO = copy only files that do not exist in destination
+    robocopy "%SRC_SAMPLES%" "%DEST%\sample_tim" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+    set "RC=!ERRORLEVEL!"
+    if !RC! GEQ 8 (
+        echo ERROR: robocopy failed ^(exit code !RC!^)
+        pause & exit /b 1
+    )
+    echo [ok] sample_tim ^(robocopy exit !RC!^)
+) else (
+    echo [--] sample_tim folder not found, skipped
+)
+
+REM --- zip packaging ---
+if exist "%ZIP_PATH%" del /Q "%ZIP_PATH%"
+
+set "ZIP_RC=1"
+
+where tar >nul 2>&1
+if errorlevel 1 goto :zip_powershell
+
+pushd "%RELEASE_ROOT%"
+tar -a -c -f "%NAME%.zip" "%NAME%"
+set "ZIP_RC=%ERRORLEVEL%"
+popd
+goto :zip_check
+
+:zip_powershell
+echo [--] tar not found, trying PowerShell Compress-Archive...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Compress-Archive -Path '%RELEASE_ROOT%\%NAME%' -DestinationPath '%ZIP_PATH%' -Force"
+set "ZIP_RC=%ERRORLEVEL%"
+
+:zip_check
+if not "%ZIP_RC%"=="0" (
+    echo WARNING: zip packaging failed ^(exit %ZIP_RC%^)
+    echo [!!] zip skipped
+) else (
+    for %%F in ("%ZIP_PATH%") do set "ZIP_SIZE=%%~zF"
+    echo [ok] %NAME%.zip ^(!ZIP_SIZE! bytes^)
+)
+
+echo.
+echo RELEASE READY
+echo   folder: %DEST%
+if exist "%ZIP_PATH%" echo   zip:    %ZIP_PATH%
+echo.
+echo Contents:
+dir /b "%DEST%"
+
+REM Uncomment to open the folder in Explorer after release:
+REM start "" "%DEST%"
+
+pause
+exit /b 0
