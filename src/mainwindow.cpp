@@ -214,9 +214,11 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 	QStringList files = dir.entryList(QDir::Files);
 	files.sort();
 	int count = 0, timFiles = 0, skipped = 0, metaSaved = 0;
+	int stpAffected = 0;
 	QStringList errors;
 	QStringList metaErrors;
 	const QString ext = imageExt.startsWith('.') ? imageExt : ("." + imageExt);
+	const bool bmpOutput = (ext.compare(".bmp", Qt::CaseInsensitive) == 0);
 
 	for (int idx = 0; idx < files.size(); ++idx) {
 		const QString &fname = files[idx];
@@ -254,6 +256,12 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 		int n = 0;
 		for (const Tim::Group &g : groups) {
 			for (const QString &w : g.warnings) emit logMsg(fname + ": " + w);
+
+			if (bmpOutput && groupHasAnyStp(g)) {
+				++stpAffected;
+				emit logMsg(fname + ": !!! ВНИМАНИЕ: BMP потеряет STP-биты в 16bpp-группе");
+			}
+
 			for (int i = 0; i < g.images.size(); ++i) {
 				++n;
 				QString imgName = QString("%1_img%2%3").arg(stem).arg(n, 2, 10, QChar('0')).arg(ext);
@@ -296,6 +304,13 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 		.arg(count).arg(ext).arg(timFiles).arg(skipped);
 	if (saveMeta)
 		msg += QString(" Метаданных: %1.").arg(metaSaved);
+	if (stpAffected > 0) {
+		msg += QString("\n\nВНИМАНИЕ: в %1 '16bpp-группе(ах)' были STP-пиксели. "
+					   "BMP не хранит альфа-канал — при обратном конвертировании "
+					   "STP-биты будут сброшены. Используйте PNG."
+					   "Подробнее в Журнал логов (меню Разное)")
+			.arg(stpAffected);
+	}
 	if (!metaErrors.isEmpty())
 		errors.append(metaErrors);
 	emit finished(msg, errors, QStringList(), false);
@@ -362,7 +377,7 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 		QByteArray newBytes = Tim::rebuildAll(groups);
 		if (newBytes.size() != data.size()) {
 			++normalized;
-			emit logMsg(QString("%1: нормализован %2 → %3")
+			emit logMsg(QString("%1: !!! ВНИМАНИЕ: нормализован %2 → %3")
 				.arg(fname).arg(data.size()).arg(newBytes.size()));
 		}
 		QFile out(path);
@@ -1781,12 +1796,28 @@ void MainWindow::batchReplace() {
 	m_batchThread->start();
 }
 
-void MainWindow::onBatchProgress(int current, int total, const QString &fileName) { setStatus(tr("%1/%2 — %3").arg(current).arg(total).arg(fileName)); }
-void MainWindow::onBatchLog(const QString &msg) { qInfo() << msg; }
+void MainWindow::onBatchProgress(int current, int total, const QString &fileName) {
+	QString prefix = QString("%1/%2 — ").arg(current).arg(total);
+	const QFontMetrics fm = m_statusLabel->fontMetrics();
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+	const int prefixW = fm.horizontalAdvance(prefix);
+#else
+	const int prefixW = fm.width(prefix);
+#endif
+	int available = qMax(60, m_statusLabel->width() - prefixW - 12);
+	QString shortName = fm.elidedText(fileName, Qt::ElideMiddle, available);
+	setStatus(prefix + shortName);
+}
+
+void MainWindow::onBatchLog(const QString &msg) {
+	qInfo() << msg; 
+}
+
 void MainWindow::onBatchFinished(const QString &summary, const QStringList &errors,
 								 const QStringList &warnings, bool openedFileRewritten) {
 	m_batchRunning = false;
 	if (openedFileRewritten && !m_sourcePath.isEmpty()) loadTimFromPath(m_sourcePath, true);
+
 	QString msg = summary;
 	if (!errors.isEmpty()) msg += "\n\nОшибки:\n" + errors.mid(0, 10).join("\n");
 	if (!warnings.isEmpty()) {
@@ -1796,9 +1827,12 @@ void MainWindow::onBatchFinished(const QString &summary, const QStringList &erro
 		if (warnings.size() > 30) msg += QString("\n...и ещё %1").arg(warnings.size() - 30);
 		for (const auto &w : warnings) qWarning() << "size mismatch:" << w;
 	}
+
 	qInfo() << summary;
 	showMsgBox(this, QMessageBox::Information, "Готово", msg);
-	setStatus(summary);
+
+	const QString statusLine = summary.section('\n', 0, 0).trimmed();
+	setStatus(statusLine.isEmpty() ? tr("Готово.") : statusLine);
 }
 
 // =====================================================================

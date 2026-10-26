@@ -41,11 +41,12 @@ REM --- configure (re-uses the cache if present) ---
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 cd /d "%BUILD_DIR%"
 
+REM Dev build: no UPX. Use scripts\release.bat for the compressed release.
+
 cmake -G "MinGW Makefiles" ^
       -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
       -DTTPTT_QT_DIR="%QT_DIR%" ^
-      -DTTPTT_UPX=ON ^
-      -DTTPTT_UPX_MODE=fast ^
+      -DTTPTT_UPX=OFF ^
       "%PROJECT_ROOT%"
 if errorlevel 1 (
     echo ERROR: CMake configuration failed.

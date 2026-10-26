@@ -40,13 +40,31 @@ REM --- create release dir ---
 if not exist "%RELEASE_ROOT%" mkdir "%RELEASE_ROOT%"
 if not exist "%DEST%" mkdir "%DEST%"
 
-REM --- ttptt.exe (always overwrite) ---
+REM --- ttptt.exe (copy + UPX brute) ---
 copy /Y "%SRC_EXE%" "%DEST%\ttptt.exe" >nul
 if errorlevel 1 (
     echo ERROR: failed to copy ttptt.exe
     pause & exit /b 1
 )
-echo [ok] ttptt.exe
+for %%F in ("%DEST%\ttptt.exe") do set "EXE_SIZE_RAW=%%~zF"
+echo [ok] ttptt.exe copied ^(!EXE_SIZE_RAW! bytes^)
+
+where upx >nul 2>&1
+if errorlevel 1 (
+    echo [--] upx not found in PATH, skipping compression
+) else (
+    echo [..] upx --brute ^(may take several minutes^)...
+    REM Decompress if already packed (from a previous UPX=ON build).
+    REM Errors are ignored: if the file isn't packed, upx -d exits non-zero.
+    upx -d "%DEST%\ttptt.exe" >nul 2>&1
+    upx --brute --force "%DEST%\ttptt.exe"
+    if errorlevel 1 (
+        echo ERROR: upx --brute failed
+        pause & exit /b 1
+    )
+    for %%F in ("%DEST%\ttptt.exe") do set "EXE_SIZE_PACKED=%%~zF"
+    echo [ok] ttptt.exe compressed ^(!EXE_SIZE_PACKED! bytes, was !EXE_SIZE_RAW!^)
+)
 
 REM --- README.md (always overwrite) ---
 copy /Y "%SRC_README%" "%DEST%\README.md" >nul
