@@ -26,7 +26,7 @@ public:
 	explicit BatchWorker(QObject *parent = nullptr) : QObject(parent) {}
 public slots:
 	void runExtract(const QString &folder, bool anyPal, bool autoAct, bool autoPal,
-					bool autoGpl, bool saveAllPalettes, bool saveMeta);
+					bool autoGpl, bool saveAllPalettes, bool saveMeta, const QString &imageExt);
 	void runReplace(const QString &folder, const QString &currentSourcePath);
 signals:
 	void progress(int current, int total, const QString &fileName);
@@ -108,7 +108,8 @@ private:
 	void recomputeSizeFromDims(QLineEdit *wEdit, QLineEdit *hEdit,
 								QLineEdit *sizeEdit, bool updatePixels);
 	int saveExtraPalettes(const Tim::Group &g, int imgIdx, int currentPalRow,
-						  const QString &dirPath, const QString &namePrefix);
+						  const QString &dirPath, const QString &namePrefix,
+						  const QString &ext);
 	void updateRecentMenu();
 	void applyTheme(bool dark);
 	void rememberDir(const QString &path);
@@ -148,6 +149,7 @@ private:
 	bool m_suppressSizeTrace = false;
 	bool m_darkTheme = false;
 	bool m_previewRefreshPending = false;
+	QString m_batchImageFormat = "png";
 	QSize m_previewSrcSize;
 	QSize m_previewDisplaySize;
 	QString m_sourcePath;

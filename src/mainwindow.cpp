@@ -26,8 +26,10 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+// #include <QSize>
 #include <QColor>
 // #include <QDialog>
+#include <QInputDialog>
 #include <QColorDialog>
 #include <QDir>
 #include <QPalette>
@@ -115,7 +117,25 @@ static bool parseFlexible(const QString &sIn, int *out, QString *err = nullptr) 
 	return true;
 }
 
-// Запись метаданных .ttptt (без пикселей!)
+// STP-детекция для 16bpp (BMP не хранит альфу)
+static bool imageHasStpPixels(const Tim::Image &im, int bpp) {
+	if (bpp != 2) return false;
+	const QByteArray &d = im.data;
+	const uchar *p = reinterpret_cast<const uchar*>(d.constData());
+	int n = d.size() / 2;
+	for (int i = 0; i < n; ++i)
+		if (Tim::rd16(p + i * 2) & 0x8000) return true;
+	return false;
+}
+
+static bool groupHasAnyStp(const Tim::Group &g) {
+	if (g.bpp != 2) return false;
+	for (const auto &im : g.images)
+		if (imageHasStpPixels(im, g.bpp)) return true;
+	return false;
+}
+
+// Запись метаданных .ttptt
 static bool writeTtpttFile(const QString &path, const QVector<Tim::Group> &groups,
 						   const QString &sourcePath = QString(),
 						   int paletteRow = 0, int currentEntry = 0,
@@ -145,18 +165,25 @@ static bool writeTtpttFile(const QString &path, const QVector<Tim::Group> &group
 	return true;
 }
 
-// Поиск PNG по соглашению об именах
+// Поиск изображения по соглашению об именах (.png предпочтительнее .bmp).
 static QString findTimPng(const QString &dirPath, const QString &stem,
 						  int globalIdx, bool singleImage,
 						  bool allowPalFallback)
 {
 	QDir dir(dirPath);
 	QStringList candidates;
-	if (singleImage) candidates << (stem + ".png");
+	if (singleImage) {
+		candidates << (stem + ".png");
+		candidates << (stem + ".bmp");
+	}
 	candidates << QString("%1_img%2.png").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
+	candidates << QString("%1_img%2.bmp").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
 	candidates << QString("%1_img%2.png").arg(stem).arg(globalIdx);
-	if (allowPalFallback)
+	candidates << QString("%1_img%2.bmp").arg(stem).arg(globalIdx);
+	if (allowPalFallback) {
 		candidates << QString("%1_img%2_pal01.png").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
+		candidates << QString("%1_img%2_pal01.bmp").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
+	}
 
 	for (const QString &cand : candidates) {
 		const QString full = dir.filePath(cand);
@@ -182,13 +209,14 @@ static QStringList autoSavePalettesHelper(const Tim::Group &g, const QString &ba
 
 void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 							 bool autoPal, bool autoGpl, bool saveAllPalettes,
-							 bool saveMeta) {
+							 bool saveMeta, const QString &imageExt) {
 	QDir dir(folder);
 	QStringList files = dir.entryList(QDir::Files);
 	files.sort();
 	int count = 0, timFiles = 0, skipped = 0, metaSaved = 0;
 	QStringList errors;
 	QStringList metaErrors;
+	const QString ext = imageExt.startsWith('.') ? imageExt : ("." + imageExt);
 
 	for (int idx = 0; idx < files.size(); ++idx) {
 		const QString &fname = files[idx];
@@ -215,7 +243,6 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 		QString stem = QFileInfo(fname).completeBaseName();
 		if (stem.isEmpty()) stem = fname;
 
-		// Метаданные рядом с PNG
 		if (saveMeta) {
 			QString metaPath = dir.filePath(stem + ".ttptt");
 			if (writeTtpttFile(metaPath, groups, dir.filePath(fname), 0, 0, true, false))
@@ -229,15 +256,15 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 			for (const QString &w : g.warnings) emit logMsg(fname + ": " + w);
 			for (int i = 0; i < g.images.size(); ++i) {
 				++n;
-				QString pngName = QString("%1_img%2.png").arg(stem).arg(n, 2, 10, QChar('0'));
-				QString pngPath = dir.filePath(pngName);
+				QString imgName = QString("%1_img%2%3").arg(stem).arg(n, 2, 10, QChar('0')).arg(ext);
+				QString imgPath = dir.filePath(imgName);
 				QImage img = Tim::decodeImage(g, i, 0, -1);
 				if (img.isNull()) {
-					errors << pngPath + ": null image";
+					errors << imgPath + ": null image";
 					continue;
 				}
-				if (!img.save(pngPath)) {
-					errors << pngPath + ": save failed";
+				if (!img.save(imgPath)) {
+					errors << imgPath + ": save failed";
 					continue;
 				}
 				++count;
@@ -253,9 +280,10 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 					for (int r = 1; r < ch; ++r) {
 						QImage pimg = Tim::decodeImage(g, i, r, -1);
 						if (pimg.isNull()) continue;
-						QString ppath = dir.filePath(QString("%1_img%2_pal%3.png")
+						QString ppath = dir.filePath(QString("%1_img%2_pal%3%4")
 							.arg(stem).arg(n, 2, 10, QChar('0'))
-							.arg(r, 2, 10, QChar('0')));
+							.arg(r, 2, 10, QChar('0'))
+							.arg(ext));
 						if (pimg.save(ppath)) ++count;
 					}
 				}
@@ -263,8 +291,9 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 		}
 	}
 
-	QString msg = QString("Экспортировано %1 PNG из %2 TIM-файлов (пропущено не-TIM: %3).")
-		.arg(count).arg(timFiles).arg(skipped);
+	QString msg = QString("Экспортировано %1 файлов (%2) из %3 TIM-файлов "
+						  "(пропущено не-TIM: %4).")
+		.arg(count).arg(ext).arg(timFiles).arg(skipped);
 	if (saveMeta)
 		msg += QString(" Метаданных: %1.").arg(metaSaved);
 	if (!metaErrors.isEmpty())
@@ -304,25 +333,24 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 				++n;
 				const int w = Tim::widthWordsToPixels(g.bpp, g.images[i].header.widthWords);
 				const int h = g.images[i].header.height;
-				const QString pngName =
-					QString("%1_img%2.png").arg(stem).arg(n, 2, 10, QChar('0'));
 
 				const QString pngPath = findTimPng(dir.path(), stem, n, false, false);
 				if (pngPath.isEmpty()) { ++missing; continue; }
+				const QString imgName = QFileInfo(pngPath).fileName();
 
 				QImage im(pngPath);
 				if (im.isNull()) {
-					errors << pngName + " → " + fname + ": open failed";
+					errors << imgName + " → " + fname + ": open failed";
 					continue;
 				}
 				if (im.width() != w || im.height() != h) {
-					sizeMismatches << QString("%1 → %2: PNG %3x%4, TIM %5x%6")
-						.arg(pngName, fname)
+					sizeMismatches << QString("%1 → %2: image %3x%4, TIM %5x%6")
+						.arg(imgName, fname)
 						.arg(im.width()).arg(im.height()).arg(w).arg(h);
 				}
 				im = Tim::normalizeImageForTim(im, w, h);
 				if (!Tim::applyEncodedToImage(g, i, im, 0)) {
-					errors << pngName + " → " + fname + ": encode failed";
+					errors << imgName + " → " + fname + ": encode failed";
 					continue;
 				}
 				changed = true;
@@ -416,25 +444,28 @@ void MainWindow::loadConfig() {
 	m_batchSaveTtptt = m_settings->value("batch_save_ttptt", false).toBool();
 	m_autoSaveTtptt = m_settings->value("auto_save_ttptt", true).toBool();
 	m_lastDir = m_settings->value("last_dir").toString();
+	m_batchImageFormat = m_settings->value("batch_image_format", "png").toString();
+	if (m_batchImageFormat != "bmp" && m_batchImageFormat != "png") m_batchImageFormat = "png";
 }
 
 void MainWindow::saveConfig() {
-	m_settings->setValue("recent_files", m_recentFiles);
+	m_settings->setValue("theme", m_darkTheme ? "dark" : "light");
+	m_settings->setValue("show_log", m_showLog);
 	m_settings->setValue("zoom_fit", m_zoomFit);
 	m_settings->setValue("show_transparency", m_showStp);
-	m_settings->setValue("theme", m_darkTheme ? "dark" : "light");
 	m_settings->setValue("auto_save_act_with_png", m_autoSaveAct);
 	m_settings->setValue("auto_save_pal_with_png", m_autoSavePal);
 	m_settings->setValue("auto_save_gpl_with_png", m_autoSaveGpl);
 	m_settings->setValue("batch_save_act_with_png", m_batchSaveAct);
 	m_settings->setValue("batch_save_pal_with_png", m_batchSavePal);
 	m_settings->setValue("batch_save_gpl_with_png", m_batchSaveGpl);
-	m_settings->setValue("show_log", m_showLog);
+	m_settings->setValue("batch_image_format", m_batchImageFormat);
 	m_settings->setValue("batch_save_all_palettes", m_saveAllPalettesBatch);
 	m_settings->setValue("auto_save_all_palettes", m_saveAllPalettesAuto);
 	m_settings->setValue("auto_save_ttptt", m_autoSaveTtptt);
 	m_settings->setValue("batch_save_ttptt", m_batchSaveTtptt);
 	m_settings->setValue("last_dir", m_lastDir);
+	m_settings->setValue("recent_files", m_recentFiles);
 	m_settings->setValue("window_geometry", saveGeometry());
 	m_settings->sync();
 }
@@ -489,21 +520,20 @@ void MainWindow::buildMenus() {
 	m_fileMenu = mb->addMenu(tr("Файл"));
 	m_fileMenu->addAction(tr("Открыть TIM/Метаданные..."), this, &MainWindow::openTim, QKeySequence("Ctrl+O"));
 	m_fileMenu->addAction(tr("Открыть как сырой TIM..."), this, &MainWindow::openRawTim, QKeySequence("Ctrl+Shift+O"));
-	m_fileMenu->addAction(tr("Открыть метаданные (*.ttptt)..."), this, &MainWindow::openTtptt, QKeySequence("Ctrl+Alt+O"));
 	m_fileMenu->addAction(tr("Заменить текущее изображение..."), this, &MainWindow::replaceImage, QKeySequence("Ctrl+R"));
 	m_fileMenu->addSeparator();
 	m_fileMenu->addAction(tr("Сохранить TIM"), this, &MainWindow::saveTim, QKeySequence("Ctrl+S"));
 	m_fileMenu->addAction(tr("Сохранить TIM как..."), this, &MainWindow::saveTimAs);
-	m_fileMenu->addAction(tr("Сохранить изображение как PNG..."), this, &MainWindow::savePng, QKeySequence("Ctrl+Shift+S"));
-	m_fileMenu->addAction(tr("Сохранить все изображения как PNG..."), this, &MainWindow::saveAllPngs,
+	m_fileMenu->addSeparator();
+	m_fileMenu->addAction(tr("Сохранить изображение как PNG/BMP..."), this, &MainWindow::savePng, QKeySequence("Ctrl+Shift+S"));
+	m_fileMenu->addAction(tr("Сохранить все изображения как PNG/BMP..."), this, &MainWindow::saveAllPngs,
 						  QKeySequence("Ctrl+Shift+A"));
 	m_fileMenu->addSeparator();
-	m_saveTtpttAction = m_fileMenu->addAction(tr("Сохранить метаданные (*.ttptt)"),
-											  this, &MainWindow::saveTtptt,
+	m_saveTtpttAction = m_fileMenu->addAction(tr("Сохранить метаданные (.ttptt)"), this, &MainWindow::saveTtptt,
 											  QKeySequence("Ctrl+Alt+S"));
 	m_saveTtpttAsAction = m_fileMenu->addAction(tr("Сохранить метаданные как..."),
 												this, &MainWindow::saveTtpttAs);
-	m_autoSaveTtpttAction = m_fileMenu->addAction(tr("Сохранять метаданные .ttptt рядом с PNG"));
+	m_autoSaveTtpttAction = m_fileMenu->addAction(tr("Сохранять метаданные .ttptt рядом с PNG/BMP"));
 	m_autoSaveTtpttAction->setCheckable(true);
 	m_autoSaveTtpttAction->setChecked(m_autoSaveTtptt);
 	connect(m_autoSaveTtpttAction, &QAction::toggled, this, [this](bool v) {
@@ -517,31 +547,6 @@ void MainWindow::buildMenus() {
 	m_fileMenu->addSeparator();
 	m_fileMenu->addAction(tr("Выход"), this, &QWidget::close);
 
-	auto *pm = mb->addMenu(tr("Палитра"));
-	pm->addAction(tr("Экспорт палитры..."), this, &MainWindow::exportPalette);
-	pm->addAction(tr("Импорт палитры..."), this, &MainWindow::importPalette);
-	pm->addSeparator();
-	m_autoActAction = pm->addAction(tr("Сохранять ACT рядом с PNG"));
-	m_autoActAction->setCheckable(true);
-	m_autoActAction->setChecked(m_autoSaveAct);
-	connect(m_autoActAction, &QAction::toggled, this, [this](bool v) { m_autoSaveAct = v; });
-
-	m_autoPalAction = pm->addAction(tr("Сохранять PAL рядом с PNG"));
-	m_autoPalAction->setCheckable(true);
-	m_autoPalAction->setChecked(m_autoSavePal);
-	connect(m_autoPalAction, &QAction::toggled, this, [this](bool v) { m_autoSavePal = v; });
-
-	m_autoGplAction = pm->addAction(tr("Сохранять GPL рядом с PNG"));
-	m_autoGplAction->setCheckable(true);
-	m_autoGplAction->setChecked(m_autoSaveGpl);
-	connect(m_autoGplAction, &QAction::toggled, this, [this](bool v) { m_autoSaveGpl = v; });
-
-	pm->addSeparator();
-	m_manualAllPalettesAction = pm->addAction(tr("Сохранять все изображения в каждой палитре"));
-	m_manualAllPalettesAction->setCheckable(true);
-	m_manualAllPalettesAction->setChecked(m_saveAllPalettesAuto);
-	connect(m_manualAllPalettesAction, &QAction::toggled, this, [this](bool v) { m_saveAllPalettesAuto = v; });
-
 	auto *em = mb->addMenu(tr("Правка"));
 	em->addAction(tr("Применить метаданные"), this, &MainWindow::applyMetadata, QKeySequence("Ctrl+Return"));
 	em->addAction(tr("Сбросить изменения"), this, &MainWindow::resetMetadata, QKeySequence("Ctrl+Shift+R"));
@@ -552,6 +557,31 @@ void MainWindow::buildMenus() {
 	em->addAction(tr("Разделить изображение на два"), this, &MainWindow::splitImage);
 	em->addAction(tr("Слить со следующим"), this, &MainWindow::mergeWithNext);
 	em->addAction(tr("Слить с предыдущим"), this, &MainWindow::mergeWithPrev);
+
+	auto *pm = mb->addMenu(tr("Палитра"));
+	pm->addAction(tr("Экспорт палитры..."), this, &MainWindow::exportPalette);
+	pm->addAction(tr("Импорт палитры..."), this, &MainWindow::importPalette);
+	pm->addSeparator();
+	m_autoActAction = pm->addAction(tr("Сохранять ACT рядом с изображением"));
+	m_autoActAction->setCheckable(true);
+	m_autoActAction->setChecked(m_autoSaveAct);
+	connect(m_autoActAction, &QAction::toggled, this, [this](bool v) { m_autoSaveAct = v; });
+
+	m_autoPalAction = pm->addAction(tr("Сохранять PAL рядом с изображением"));
+	m_autoPalAction->setCheckable(true);
+	m_autoPalAction->setChecked(m_autoSavePal);
+	connect(m_autoPalAction, &QAction::toggled, this, [this](bool v) { m_autoSavePal = v; });
+
+	m_autoGplAction = pm->addAction(tr("Сохранять GPL рядом с изображением"));
+	m_autoGplAction->setCheckable(true);
+	m_autoGplAction->setChecked(m_autoSaveGpl);
+	connect(m_autoGplAction, &QAction::toggled, this, [this](bool v) { m_autoSaveGpl = v; });
+
+	pm->addSeparator();
+	m_manualAllPalettesAction = pm->addAction(tr("Сохранять все изображения в каждой палитре"));
+	m_manualAllPalettesAction->setCheckable(true);
+	m_manualAllPalettesAction->setChecked(m_saveAllPalettesAuto);
+	connect(m_manualAllPalettesAction, &QAction::toggled, this, [this](bool v) { m_saveAllPalettesAuto = v; });
 
 	auto *vm = mb->addMenu(tr("Вид"));
 	m_stpAction = vm->addAction(tr("Прозрачность (STP)"), this, &MainWindow::toggleStp);
@@ -575,23 +605,23 @@ void MainWindow::buildMenus() {
 	vm->addSeparator();
 	
 	auto *bm = mb->addMenu(tr("Пакетная обработка"));
-	bm->addAction(tr("Пакетное извлечение PNG из TIM"), this, &MainWindow::batchExtract);
+	bm->addAction(tr("Пакетное извлечение PNG/BMP из TIM"), this, &MainWindow::batchExtract);
 	bm->addAction(tr("Пакетная замена изображений в TIM"), this, &MainWindow::batchReplace);
 	bm->addSeparator();
-	m_batchActAction = bm->addAction(tr("Сохранять палитру ACT рядом с PNG"));
+	m_batchActAction = bm->addAction(tr("Сохранять палитру ACT рядом с изображением"));
 	m_batchActAction->setCheckable(true);
 	m_batchActAction->setChecked(m_batchSaveAct);
 	connect(m_batchActAction, &QAction::toggled, this, [this](bool v) { m_batchSaveAct = v; });
-	m_batchPalAction = bm->addAction(tr("Сохранять палитру PAL рядом с PNG"));
+	m_batchPalAction = bm->addAction(tr("Сохранять палитру PAL рядом с изображением"));
 	m_batchPalAction->setCheckable(true);
 	m_batchPalAction->setChecked(m_batchSavePal);
 	connect(m_batchPalAction, &QAction::toggled, this, [this](bool v) { m_batchSavePal = v; });
-	m_batchGplAction = bm->addAction(tr("Сохранять палитру GPL рядом с PNG"));
+	m_batchGplAction = bm->addAction(tr("Сохранять палитру GPL рядом с изображением"));
 	m_batchGplAction->setCheckable(true);
 	m_batchGplAction->setChecked(m_batchSaveGpl);
 	connect(m_batchGplAction, &QAction::toggled, this, [this](bool v) { m_batchSaveGpl = v; });
 	bm->addSeparator();
-	m_batchTtpttAction = bm->addAction(tr("Сохранять метаданные .ttptt рядом с PNG"));
+	m_batchTtpttAction = bm->addAction(tr("Сохранять метаданные .ttptt рядом с изображением"));
 	m_batchTtpttAction->setCheckable(true);
 	m_batchTtpttAction->setChecked(m_batchSaveTtptt);
 	connect(m_batchTtpttAction, &QAction::toggled, this, [this](bool v) { m_batchSaveTtptt = v; });
@@ -606,9 +636,9 @@ void MainWindow::buildMenus() {
 	m_logAction->setCheckable(true);
 	m_logAction->setChecked(m_logWindow && m_logWindow->isVisible());
 	mm->addSeparator();
-	mm->addAction(tr("Ассоциация .tim с ttptt"), this,
+	mm->addAction(tr("Ассоциация .tim с программой"), this,
 				  [this]() { registerFileAssociation(".tim"); });
-	mm->addAction(tr("Ассоциация .ttptt с ttptt"), this,
+	mm->addAction(tr("Ассоциация .ttptt с программой"), this,
 				  [this]() { registerFileAssociation(".ttptt"); });
 	mm->addSeparator();
 	mm->addAction(tr("Снять ассоциацию .tim"), this,
@@ -1056,7 +1086,8 @@ void MainWindow::saveTimAs() {
 }
 
 int MainWindow::saveExtraPalettes(const Tim::Group &g, int imgIdx, int currentPalRow,
-								   const QString &dirPath, const QString &namePrefix) {
+								   const QString &dirPath, const QString &namePrefix,
+								   const QString &ext) {
 	if (!m_saveAllPalettesAuto) return 0;
 	if (!(g.bpp == 0 || g.bpp == 1)) return 0;
 	if (!g.hasClut || g.clutHeader.height <= 1) return 0;
@@ -1068,7 +1099,7 @@ int MainWindow::saveExtraPalettes(const Tim::Group &g, int imgIdx, int currentPa
 		QImage pimg = Tim::decodeImage(g, imgIdx, r, -1);
 		if (pimg.isNull()) continue;
 		QString ppath = dirPath + "/" + namePrefix +
-						QString("_pal%1.png").arg(r, 2, 10, QChar('0'));
+						QString("_pal%1%2").arg(r, 2, 10, QChar('0')).arg(ext);
 		if (pimg.save(ppath)) ++saved;
 	}
 	return saved;
@@ -1087,9 +1118,28 @@ void MainWindow::savePng() {
 		? QString("%1_img%2.png").arg(m_sourceStem).arg(m_currentEntry + 1, 2, 10, QChar('0'))
 		: m_sourceStem + ".png";
 
-	QString path = QFileDialog::getSaveFileName(this, "PNG", def, "PNG (*.png)");
+	QString path = QFileDialog::getSaveFileName(this,
+		tr("Сохранить изображение"),
+		def,
+		tr("PNG (*.png);;BMP (*.bmp)"));
 	if (path.isEmpty()) return;
-	if (!img.save(path)) return;
+
+	const QString ext = "." + QFileInfo(path).suffix().toLower();
+
+	if (ext == ".bmp" && g->bpp == 2 && imageHasStpPixels(g->images[ii], g->bpp)) {
+		if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
+			tr("В изображении есть STP-пиксели (полупрозрачность).\n"
+			   "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
+			   "STP-биты будут сброшены.\n\nПродолжить?"),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+			return;
+	}
+
+	if (!img.save(path)) {
+		showMsgBox(this, QMessageBox::Critical, tr("Ошибка"),
+				   tr("Не удалось сохранить:\n") + path);
+		return;
+	}
 	rememberDir(path);
 
 	QString base = QFileInfo(path).absolutePath() + "/" + QFileInfo(path).completeBaseName();
@@ -1097,15 +1147,15 @@ void MainWindow::savePng() {
 
 	saveExtraPalettes(*g, ii, m_paletteRow,
 					  QFileInfo(path).absolutePath(),
-					  QFileInfo(path).completeBaseName());
+					  QFileInfo(path).completeBaseName(),
+					  ext);
 
-	// «Сохранять метаданные рядом с PNG»
 	if (m_autoSaveTtptt) {
 		QString ttpttPath = QFileInfo(path).absolutePath() + "/" + m_sourceStem + ".ttptt";
 		if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
 						   m_currentEntry, m_zoomFit, m_showStp)) {
 			m_ttpttPath = ttpttPath;
-			qInfo() << "Метаданные сохранены рядом с PNG:" << ttpttPath;
+			qInfo() << "Метаданные сохранены рядом с изображением:" << ttpttPath;
 		}
 	}
 
@@ -1116,13 +1166,38 @@ void MainWindow::savePng() {
 void MainWindow::saveAllPngs() {
 	if (m_batchRunning || m_groups.isEmpty()) return;
 
+	// 1) Формат
+	QStringList fmtItems;
+	fmtItems << tr("PNG (*.png)") << tr("BMP (*.bmp)");
+	bool ok = false;
+	QString fmt = QInputDialog::getItem(this, tr("Формат изображений"),
+		tr("Формат для сохранения:"), fmtItems, 0, false, &ok);
+	if (!ok) return;
+	const QString ext = fmt.contains("bmp", Qt::CaseInsensitive) ? ".bmp" : ".png";
+
+	// 2) Предупреждение про STP в BMP
+	if (ext == ".bmp") {
+		int stpGroups = 0;
+		for (const auto &g : m_groups)
+			if (groupHasAnyStp(g)) ++stpGroups;
+		if (stpGroups > 0) {
+			if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
+				tr("В %1 группе(ах) есть 16bpp-изображения со STP-пикселями.\n"
+				   "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
+				   "STP-биты будут сброшены.\n\nПродолжить?").arg(stpGroups),
+				QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+				return;
+		}
+	}
+
+	// 3) Каталог
 	QString dirPath;
 	if (!m_sourcePath.isEmpty())
 		dirPath = QFileInfo(m_sourcePath).absolutePath();
 	else if (!m_ttpttPath.isEmpty())
 		dirPath = QFileInfo(m_ttpttPath).absolutePath();
 	else
-		dirPath = QFileDialog::getExistingDirectory(this, tr("Куда сохранять PNG"), initialDir());
+		dirPath = QFileDialog::getExistingDirectory(this, tr("Куда сохранять изображения"), initialDir());
 	if (dirPath.isEmpty()) return;
 
 	QString stem = m_sourceStem;
@@ -1160,37 +1235,38 @@ void MainWindow::saveAllPngs() {
 			continue;
 		}
 
-		QString pngName = singleImage
-			? (stem + ".png")
-			: QString("%1_img%2.png").arg(stem).arg(it.globalIdx, 2, 10, QChar('0'));
-		QString pngPath = dir.filePath(pngName);
-		if (!img.save(pngPath)) {
-			errors << QString("img#%1: save failed (%2)").arg(it.globalIdx).arg(pngPath);
+		QString name = singleImage
+			? (stem + ext)
+			: QString("%1_img%2%3").arg(stem).arg(it.globalIdx, 2, 10, QChar('0')).arg(ext);
+		QString fullPath = dir.filePath(name);
+		if (!img.save(fullPath)) {
+			errors << QString("img#%1: save failed (%2)").arg(it.globalIdx).arg(fullPath);
 			continue;
 		}
 		++saved;
 
-		// Палитры рядом с PNG
 		QString baseNoext = dir.filePath(singleImage
-			? stem : QString("%1_img%2").arg(stem).arg(it.globalIdx, 2, 10, QChar('0')));
+			? stem
+			: QString("%1_img%2").arg(stem).arg(it.globalIdx, 2, 10, QChar('0')));
 		autoSavePalettesHelper(g, baseNoext, m_autoSaveAct, m_autoSavePal, m_autoSaveGpl);
 
-		// Все палитры
-		QString namePrefix = singleImage ? stem : QString("%1_img%2").arg(stem).arg(it.globalIdx, 2, 10, QChar('0'));
-		saved += saveExtraPalettes(g, it.imgIdx, pr, dir.path(), namePrefix);
+		QString namePrefix = singleImage
+			? stem
+			: QString("%1_img%2").arg(stem).arg(it.globalIdx, 2, 10, QChar('0'));
+		saved += saveExtraPalettes(g, it.imgIdx, pr, dir.path(), namePrefix, ext);
 	}
 
-	// Метаданные рядом с PNG?
 	if (m_autoSaveTtptt) {
 		QString ttpttPath = dir.filePath(stem + ".ttptt");
 		if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
 						   m_currentEntry, m_zoomFit, m_showStp))
-			qInfo() << "Метаданные сохранены рядом с PNG:" << ttpttPath;
+			qInfo() << "Метаданные сохранены рядом с изображениями:" << ttpttPath;
 		else
 			qWarning() << "Не удалось сохранить метаданные:" << ttpttPath;
 	}
 
-	QString msg = QString("Сохранено %1 PNG в %2").arg(saved).arg(dirPath);
+	QString msg = QString("Сохранено %1 изображений (%2) в %3")
+		.arg(saved).arg(ext).arg(dirPath);
 	if (!errors.isEmpty())
 		msg += "\n\nОшибки:\n" + errors.mid(0, 10).join("\n");
 	showMsgBox(this, QMessageBox::Information, tr("Готово"), msg);
@@ -1646,7 +1722,20 @@ void MainWindow::batchExtract() {
 		showMsgBox(this, QMessageBox::Information, "Инфо", "Пусто.");
 		return;
 	}
-	qInfo() << QString("Пакетное извлечение: папка %1 (%2 файлов)").arg(folder).arg(filesInDir.size());
+
+	// Формат
+	QStringList fmtItems;
+	fmtItems << tr("PNG (*.png)") << tr("BMP (*.bmp)");
+	bool ok = false;
+	QString fmt = QInputDialog::getItem(this, tr("Формат изображений"),
+		tr("Формат для извлечённых изображений:"), fmtItems,
+		m_batchImageFormat == "bmp" ? 1 : 0, false, &ok);
+	if (!ok) return;
+	m_batchImageFormat = fmt.contains("bmp", Qt::CaseInsensitive) ? "bmp" : "png";
+	const QString imageExt = "." + m_batchImageFormat;
+
+	qInfo() << QString("Пакетное извлечение: папка %1 (%2 файлов), формат %3")
+		.arg(folder).arg(filesInDir.size()).arg(m_batchImageFormat);
 	m_batchRunning = true;
 	setStatus("Извлечение...");
 	rememberDir(folder + "/x");
@@ -1660,7 +1749,8 @@ void MainWindow::batchExtract() {
 
 	connect(m_batchThread, &QThread::started, worker, [=]() {
 		worker->runExtract(folder, anyPal, m_batchSaveAct, m_batchSavePal,
-						   m_batchSaveGpl, m_saveAllPalettesBatch, saveMeta);
+						   m_batchSaveGpl, m_saveAllPalettesBatch, saveMeta,
+						   imageExt);
 	});
 	connect(worker, &BatchWorker::progress, this, &MainWindow::onBatchProgress);
 	connect(worker, &BatchWorker::logMsg, this, &MainWindow::onBatchLog);
