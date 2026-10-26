@@ -16,6 +16,5 @@ if exist "%BUILD_DIR%" (
     )
 )
 
-REM Delegate the rest to the regular build script
 call "%~dp0build.bat"
 exit /b %ERRORLEVEL%

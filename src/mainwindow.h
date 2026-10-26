@@ -1,4 +1,4 @@
-// ttptt — TIM <-> PNG converter for PlayStation 1
+// ttptt — TIM <-> Picture converter for PlayStation 1
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -55,8 +55,8 @@ private slots:
 	void saveTimAs();
 	void saveTtptt();
 	void saveTtpttAs();
-	void savePng();
-	void saveAllPngs();
+	void saveImage();
+	void saveAllImages();
 	void replaceImage();
 	void closeFile();
 	void clearRecent();
@@ -117,7 +117,7 @@ private:
 	bool loadTimFromPath(const QString &path, bool silent = false);
 	bool loadRawTimFromPath(const QString &path, bool silent = false, bool skipConfirm = false);
 	bool loadTtpttFromPath(const QString &path, bool silent = false);
-	QStringList importPngsForTtptt(const QString &dirPath, const QString &stem);
+	QStringList importImagesForTtptt(const QString &dirPath, const QString &stem);
 	bool confirmDiscard();
 	bool replaceImageFromPath(const QString &path);
 	bool importPaletteFromPath(const QString &path);
@@ -137,7 +137,6 @@ private:
 	void editPaletteColor(int idx);
 	Tim::Group *currentGroup(int *imgIdx = nullptr);
 	const Tim::Group *currentGroup(int *imgIdx = nullptr) const;
-
 	QVector<Tim::Group> m_groups;
 	QVector<QPair<int,int>> m_entries;
 	int m_currentEntry = -1;

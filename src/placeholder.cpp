@@ -1,4 +1,4 @@
-// ttptt — TIM <-> PNG converter for PlayStation 1
+// ttptt — TIM <-> Picture converter for PlayStation 1
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,20 +9,17 @@
 #include <QVector>
 #include <QDateTime>
 
-namespace PlaceholderArt {
+namespace Placeholder {
 	
 // =====================================================================
-// Заглушка для отсутствующего PNG в .ttptt-проекте
+// Заглушка для отсутствующего изображения в .ttptt-проекте
 // =====================================================================
-QImage makeMissingTimPng(int w, int h, int globalIdx, int bpp,
-						 const QString &pngName)
+QImage makeMissingImage(int w, int h, const QString &imgName)
 {
 	w = qMax(1, w);
 	h = qMax(1, h);
 	QImage img(w, h, QImage::Format_ARGB32);
 	img.fill(Qt::black);
-
-	const int realBpp = (bpp == 0) ? 4 : bpp * 8;
 
 	QPainter p(&img);
 	p.setRenderHint(QPainter::TextAntialiasing, true);
@@ -34,10 +31,9 @@ QImage makeMissingTimPng(int w, int h, int globalIdx, int bpp,
 	f.setBold(true);
 	p.setFont(f);
 
-	QString text = QStringLiteral("-NO PNG-\nimg%1\n%2x%3\n%4bpp")
-					   .arg(globalIdx).arg(w).arg(h).arg(realBpp);
-	if (!pngName.isEmpty())
-		text += QStringLiteral("\n") + pngName;
+	QString text = QStringLiteral("NO");
+	if (!imgName.isEmpty())
+		text += QStringLiteral("\n") + imgName;
 
 	const QRect r(2, 2, w - 4, h - 4);
 	p.drawText(r, Qt::AlignCenter | Qt::TextWordWrap, text);
@@ -394,4 +390,4 @@ QImage renderPlaceholder(const QSize &sz, const QFont &baseFont,
 	return img;
 }
 
-} // namespace PlaceholderArt
+} // namespace Placeholder

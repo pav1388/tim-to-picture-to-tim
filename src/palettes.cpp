@@ -1,4 +1,4 @@
-// ttptt — TIM <-> PNG converter for PlayStation 1
+// ttptt — TIM <-> Picture converter for PlayStation 1
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -148,7 +148,7 @@ static void writeGpl(const QString &path, const QVector<QColor> &pal) {
 // =====================================================================
 // PNG / BMP (палитра как картинка)
 // =====================================================================
-static Loaded readPng(const QString &path) {
+static Loaded readImage(const QString &path) {
 	Loaded r;
 	QImage img(path);
 	if (img.isNull()) return r;
@@ -184,7 +184,7 @@ Loaded loadAny(const QString &path, QString *error) {
 	const QString ext = QFileInfo(path).suffix().toLower();
 	Loaded r;
 	if (ext == "png" || ext == "bmp") {
-		r = readPng(path);
+		r = readImage(path);
 		if (!r.valid && error) *error = "Не удалось прочитать изображение";
 		return r;
 	}

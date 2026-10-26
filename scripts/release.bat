@@ -22,7 +22,7 @@ if "%VERSION%"=="" (
     pause & exit /b 1
 )
 
-set "NAME=tim-to-png-to-tim-v%VERSION%-win32-static"
+set "NAME=tim-to-picture-to-tim-v%VERSION%-win32-static"
 set "DEST=%RELEASE_ROOT%\%NAME%"
 set "ZIP_PATH=%RELEASE_ROOT%\%NAME%.zip"
 

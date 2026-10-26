@@ -1,4 +1,4 @@
-# ttptt — tim-to-png-to-tim
+# ttptt — tim-to-picture-to-tim
 
 Конвертер TIM ↔ PNG для PlayStation 1.
 
@@ -124,7 +124,7 @@
 ```
 scripts\build.bat         инкрементальная сборка → ttptt.exe
 scripts\clean-build.bat   удалить build\ и пересобрать
-scripts\release.bat       собрать releases\tim-to-png-to-tim-v<ver>\ и .zip
+scripts\release.bat       собрать releases\tim-to-picture-to-tim-v<ver>\
 ```
 
 Все скрипты используют локальную папку `qt-5.6.3-static\` в корне репозитория (в git не входит).

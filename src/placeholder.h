@@ -1,4 +1,4 @@
-// ttptt — TIM <-> PNG converter for PlayStation 1
+// ttptt — TIM <-> Picture converter for PlayStation 1
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,7 +12,7 @@
 
 class QPainter;
 
-namespace PlaceholderArt {
+namespace Placeholder {
 
 void drawPSButton(QPainter &p, const QRectF &r, int type, const QColor &c);
 
@@ -22,9 +22,10 @@ QImage renderPlaceholder(const QSize &size,
 						 const QString &subtitle,
 						 int themeIndex = -1,
 						 QString *themeNameOut = nullptr);
-QImage makeMissingTimPng(int w, int h, int globalIdx, int bpp,
-						 const QString &pngName = {});
+						 
+QImage makeMissingImage(int w, int h, const QString &imgName = {});
+
 int	 themeCount();
 QString themeName(int index);
 
-} // namespace PlaceholderArt
+} // namespace Placeholder

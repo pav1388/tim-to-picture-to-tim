@@ -1,4 +1,4 @@
-// ttptt — TIM <-> PNG converter for PlayStation 1
+// ttptt — TIM <-> Picture converter for PlayStation 1
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -166,7 +166,7 @@ static bool writeTtpttFile(const QString &path, const QVector<Tim::Group> &group
 }
 
 // Поиск изображения по соглашению об именах (.png предпочтительнее .bmp).
-static QString findTimPng(const QString &dirPath, const QString &stem,
+static QString findTimImage(const QString &dirPath, const QString &stem,
 						  int globalIdx, bool singleImage,
 						  bool allowPalFallback)
 {
@@ -334,11 +334,11 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 				const int w = Tim::widthWordsToPixels(g.bpp, g.images[i].header.widthWords);
 				const int h = g.images[i].header.height;
 
-				const QString pngPath = findTimPng(dir.path(), stem, n, false, false);
-				if (pngPath.isEmpty()) { ++missing; continue; }
-				const QString imgName = QFileInfo(pngPath).fileName();
+				const QString imagePath = findTimImage(dir.path(), stem, n, false, false);
+				if (imagePath.isEmpty()) { ++missing; continue; }
+				const QString imgName = QFileInfo(imagePath).fileName();
 
-				QImage im(pngPath);
+				QImage im(imagePath);
 				if (im.isNull()) {
 					errors << imgName + " → " + fname + ": open failed";
 					continue;
@@ -380,7 +380,7 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 	}
 
 	QString msg = QString("Изменено %1 TIM-файлов, заменено %2 изображений "
-						  "(пропущено не-TIM: %3, не найдено PNG: %4, нормализовано: %5).")
+						  "(пропущено не-TIM: %3, не найдено изображений: %4, нормализовано: %5).")
 		.arg(changedFiles).arg(replaced).arg(skipped).arg(missing).arg(normalized);
 	emit finished(msg, errors, sizeMismatches, openedFileRewritten);
 }
@@ -389,7 +389,7 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 // MainWindow Implementation
 // =====================================================================
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-	setWindowTitle(QString("ttptt: tim-to-png-to-tim v%1").arg(QCoreApplication::applicationVersion()));
+	setWindowTitle(QString("ttptt: tim-to-picture-to-tim v%1").arg(QCoreApplication::applicationVersion()));
 	setAcceptDrops(true);
 	setWindowIcon(QIcon(":/icon.ico"));
 	m_settings = new QSettings(QCoreApplication::applicationDirPath() + "/ttptt-settings.ini", QSettings::IniFormat, this);
@@ -432,12 +432,12 @@ void MainWindow::loadConfig() {
 	m_zoomFit = m_settings->value("zoom_fit", true).toBool();
 	m_showStp = m_settings->value("show_transparency", false).toBool();
 	m_darkTheme = m_settings->value("theme", "light").toString() == "dark";
-	m_autoSaveAct = m_settings->value("auto_save_act_with_png", true).toBool();
-	m_autoSavePal = m_settings->value("auto_save_pal_with_png", false).toBool();
-	m_autoSaveGpl = m_settings->value("auto_save_gpl_with_png", false).toBool();
-	m_batchSaveAct = m_settings->value("batch_save_act_with_png", false).toBool();
-	m_batchSavePal = m_settings->value("batch_save_pal_with_png", false).toBool();
-	m_batchSaveGpl = m_settings->value("batch_save_gpl_with_png", false).toBool();
+	m_autoSaveAct = m_settings->value("auto_save_act_with_image", true).toBool();
+	m_autoSavePal = m_settings->value("auto_save_pal_with_image", false).toBool();
+	m_autoSaveGpl = m_settings->value("auto_save_gpl_with_image", false).toBool();
+	m_batchSaveAct = m_settings->value("batch_save_act_with_image", false).toBool();
+	m_batchSavePal = m_settings->value("batch_save_pal_with_image", false).toBool();
+	m_batchSaveGpl = m_settings->value("batch_save_gpl_with_image", false).toBool();
 	m_showLog = m_settings->value("show_log", false).toBool();
 	m_saveAllPalettesBatch = m_settings->value("batch_save_all_palettes", false).toBool();
 	m_saveAllPalettesAuto = m_settings->value("auto_save_all_palettes", false).toBool();
@@ -453,12 +453,12 @@ void MainWindow::saveConfig() {
 	m_settings->setValue("show_log", m_showLog);
 	m_settings->setValue("zoom_fit", m_zoomFit);
 	m_settings->setValue("show_transparency", m_showStp);
-	m_settings->setValue("auto_save_act_with_png", m_autoSaveAct);
-	m_settings->setValue("auto_save_pal_with_png", m_autoSavePal);
-	m_settings->setValue("auto_save_gpl_with_png", m_autoSaveGpl);
-	m_settings->setValue("batch_save_act_with_png", m_batchSaveAct);
-	m_settings->setValue("batch_save_pal_with_png", m_batchSavePal);
-	m_settings->setValue("batch_save_gpl_with_png", m_batchSaveGpl);
+	m_settings->setValue("auto_save_act_with_image", m_autoSaveAct);
+	m_settings->setValue("auto_save_pal_with_image", m_autoSavePal);
+	m_settings->setValue("auto_save_gpl_with_image", m_autoSaveGpl);
+	m_settings->setValue("batch_save_act_with_image", m_batchSaveAct);
+	m_settings->setValue("batch_save_pal_with_image", m_batchSavePal);
+	m_settings->setValue("batch_save_gpl_with_image", m_batchSaveGpl);
 	m_settings->setValue("batch_image_format", m_batchImageFormat);
 	m_settings->setValue("batch_save_all_palettes", m_saveAllPalettesBatch);
 	m_settings->setValue("auto_save_all_palettes", m_saveAllPalettesAuto);
@@ -525,15 +525,15 @@ void MainWindow::buildMenus() {
 	m_fileMenu->addAction(tr("Сохранить TIM"), this, &MainWindow::saveTim, QKeySequence("Ctrl+S"));
 	m_fileMenu->addAction(tr("Сохранить TIM как..."), this, &MainWindow::saveTimAs);
 	m_fileMenu->addSeparator();
-	m_fileMenu->addAction(tr("Сохранить изображение как PNG/BMP..."), this, &MainWindow::savePng, QKeySequence("Ctrl+Shift+S"));
-	m_fileMenu->addAction(tr("Сохранить все изображения как PNG/BMP..."), this, &MainWindow::saveAllPngs,
+	m_fileMenu->addAction(tr("Сохранить изображение как..."), this, &MainWindow::saveImage, QKeySequence("Ctrl+Shift+S"));
+	m_fileMenu->addAction(tr("Сохранить все изображения как..."), this, &MainWindow::saveAllImages,
 						  QKeySequence("Ctrl+Shift+A"));
 	m_fileMenu->addSeparator();
 	m_saveTtpttAction = m_fileMenu->addAction(tr("Сохранить метаданные (.ttptt)"), this, &MainWindow::saveTtptt,
 											  QKeySequence("Ctrl+Alt+S"));
 	m_saveTtpttAsAction = m_fileMenu->addAction(tr("Сохранить метаданные как..."),
 												this, &MainWindow::saveTtpttAs);
-	m_autoSaveTtpttAction = m_fileMenu->addAction(tr("Сохранять метаданные .ttptt рядом с PNG/BMP"));
+	m_autoSaveTtpttAction = m_fileMenu->addAction(tr("Сохранять метаданные .ttptt рядом с изображением"));
 	m_autoSaveTtpttAction->setCheckable(true);
 	m_autoSaveTtpttAction->setChecked(m_autoSaveTtptt);
 	connect(m_autoSaveTtpttAction, &QAction::toggled, this, [this](bool v) {
@@ -605,7 +605,7 @@ void MainWindow::buildMenus() {
 	vm->addSeparator();
 	
 	auto *bm = mb->addMenu(tr("Пакетная обработка"));
-	bm->addAction(tr("Пакетное извлечение PNG/BMP из TIM"), this, &MainWindow::batchExtract);
+	bm->addAction(tr("Пакетное извлечение изображений из TIM"), this, &MainWindow::batchExtract);
 	bm->addAction(tr("Пакетная замена изображений в TIM"), this, &MainWindow::batchReplace);
 	bm->addSeparator();
 	m_batchActAction = bm->addAction(tr("Сохранять палитру ACT рядом с изображением"));
@@ -1030,13 +1030,13 @@ bool MainWindow::confirmDiscard() {
 		} else if (!m_ttpttPath.isEmpty()) {
 			auto choice = showMsgBox(this, QMessageBox::Question, "Куда сохранять",
 				"Нет исходного .tim.\n"
-				"«Да» — перезаписать PNG рядом + метаданные\n"
+				"«Да» — перезаписать изображение рядом + метаданные\n"
 				"«Нет» — сохранить как новый .tim",
 				QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
 				QMessageBox::Yes);
 			if (choice == QMessageBox::Cancel) return false;
 			if (choice == QMessageBox::Yes) {
-				saveAllPngs();
+				saveAllImages();
 				saveTtptt();
 			} else {
 				saveTimAs();
@@ -1105,7 +1105,7 @@ int MainWindow::saveExtraPalettes(const Tim::Group &g, int imgIdx, int currentPa
 	return saved;
 }
 
-void MainWindow::savePng() {
+void MainWindow::saveImage() {
 	if (m_batchRunning) return;
 	int ii = -1;
 	Tim::Group *g = currentGroup(&ii);
@@ -1130,7 +1130,7 @@ void MainWindow::savePng() {
 		if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
 			tr("В изображении есть STP-пиксели (полупрозрачность).\n"
 			   "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
-			   "STP-биты будут сброшены.\n\nПродолжить?"),
+			   "STP-биты будут сброшены. Используйте PNG.\n\nПродолжить?"),
 			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 			return;
 	}
@@ -1163,7 +1163,7 @@ void MainWindow::savePng() {
 	qInfo() << "Сохранено:" << path;
 }
 
-void MainWindow::saveAllPngs() {
+void MainWindow::saveAllImages() {
 	if (m_batchRunning || m_groups.isEmpty()) return;
 
 	// 1) Формат
@@ -1184,7 +1184,7 @@ void MainWindow::saveAllPngs() {
 			if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
 				tr("В %1 группе(ах) есть 16bpp-изображения со STP-пикселями.\n"
 				   "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
-				   "STP-биты будут сброшены.\n\nПродолжить?").arg(stpGroups),
+				   "STP-биты будут сброшены. Используйте PNG.\n\nПродолжить?").arg(stpGroups),
 				QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 				return;
 		}
@@ -1386,9 +1386,8 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	m_sourceStem = QFileInfo(path).completeBaseName();
 	m_dirty = false;
 
-	// Подхват PNG или заглушек
-	QStringList importedPngs =
-		importPngsForTtptt(QFileInfo(path).absolutePath(), m_sourceStem);
+	// Подхват изображений или заглушек
+	QStringList importedImages = importImagesForTtptt(QFileInfo(path).absolutePath(), m_sourceStem);
 
 	rememberDir(path);
 	addRecentFile(path);
@@ -1397,18 +1396,18 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 
 	QString statusMsg = QString("Метаданные: %1 | групп: %2 | изобр.: %3")
 		.arg(QFileInfo(path).fileName()).arg(m_groups.size()).arg(m_entries.size());
-	if (!importedPngs.isEmpty())
-		statusMsg += QString(" | PNG: %1").arg(importedPngs.size());
+	if (!importedImages.isEmpty())
+		statusMsg += QString(" | Изображение: %1").arg(importedImages.size());
 	if (!sourcePath.isEmpty())
 		statusMsg += QString(" | исходник: %1").arg(QFileInfo(sourcePath).fileName());
 	setStatus(statusMsg);
 	qInfo() << statusMsg;
-	if (!importedPngs.isEmpty())
-		qInfo() << "Подхвачены PNG:" << importedPngs.join(", ");
+	if (!importedImages.isEmpty())
+		qInfo() << "Подхвачены изображения:" << importedImages.join(", ");
 	return true;
 }
 
-QStringList MainWindow::importPngsForTtptt(const QString &dirPath, const QString &stem) {
+QStringList MainWindow::importImagesForTtptt(const QString &dirPath, const QString &stem) {
 	QStringList imported;
 	if (m_groups.isEmpty() || stem.isEmpty()) return imported;
 
@@ -1431,19 +1430,19 @@ QStringList MainWindow::importPngsForTtptt(const QString &dirPath, const QString
 		const int h = g.images[it.imgIdx].header.height;
 		if (w <= 0 || h <= 0) continue;
 
-		const QString pngPath = findTimPng(dirPath, stem, it.globalIdx, singleImage, true);
+		const QString imgPath = findTimImage(dirPath, stem, it.globalIdx, singleImage, true);
 
 		QImage im;
-		if (!pngPath.isEmpty()) {
-			im = QImage(pngPath);
-			if (!im.isNull()) imported << QFileInfo(pngPath).fileName();
+		if (!imgPath.isEmpty()) {
+			im = QImage(imgPath);
+			if (!im.isNull()) imported << QFileInfo(imgPath).fileName();
 		}
 		if (im.isNull()) {
 			const QString preferredName = singleImage
 				? (stem + ".png")
 				: QString("%1_img%2.png").arg(stem).arg(it.globalIdx, 2, 10, QChar('0'));
-			im = PlaceholderArt::makeMissingTimPng(w, h, it.globalIdx, g.bpp, preferredName);
-			qWarning() << "Нет PNG для image #" << it.globalIdx
+			im = Placeholder::makeMissingImage(w, h, preferredName);
+			qWarning() << "Нет изображения для image #" << it.globalIdx
 					   << "- вставлена заглушка" << w << "x" << h;
 		}
 
@@ -1451,7 +1450,7 @@ QStringList MainWindow::importPngsForTtptt(const QString &dirPath, const QString
 
 		const int palRow = qBound(0, m_paletteRow, qMax(0, int(g.clutHeader.height) - 1));
 		if (!Tim::applyEncodedToImage(g, it.imgIdx, im, palRow))
-			qWarning() << "Не удалось закодировать PNG/заглушку для img#" << it.imgIdx;
+			qWarning() << "Не удалось закодировать изображение для img#" << it.imgIdx;
 	}
 	return imported;
 }
@@ -1669,7 +1668,7 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
 
 	if (sizeChanged || padNeeded) {
 		QString msg = QString("TIM заголовок изображения будет обновлён по файлу:\n"
-							  "  png файл: %1x%2\n"
+							  "  файл: %1x%2\n"
 							  "  было: width_words=%3, height=%4 (%5x%6)\n"
 							  "  станет: width_words=%7, height=%8 (%9x%10)")
 			.arg(img.width()).arg(img.height())
@@ -1791,7 +1790,7 @@ void MainWindow::onBatchFinished(const QString &summary, const QStringList &erro
 	QString msg = summary;
 	if (!errors.isEmpty()) msg += "\n\nОшибки:\n" + errors.mid(0, 10).join("\n");
 	if (!warnings.isEmpty()) {
-		msg += QString("\n\nУведомления (PNG-размеры не совпали с TIM): %1\n%2")
+		msg += QString("\n\nУведомления (размеры не совпали с TIM): %1\n%2")
 			.arg(warnings.size())
 			.arg(warnings.mid(0, 30).join("\n"));
 		if (warnings.size() > 30) msg += QString("\n...и ещё %1").arg(warnings.size() - 30);
@@ -2002,7 +2001,7 @@ void MainWindow::refreshPreview() {
 			m_previewLabel->setPixmap(QPixmap());
 			return;
 		}
-		QImage img = PlaceholderArt::renderPlaceholder(
+		QImage img = Placeholder::renderPlaceholder(
 			sz, font(),
 			tr("Откройте TIM"),
 			tr("PS1 навсегда · ttptt"));
@@ -2092,7 +2091,7 @@ void MainWindow::onImageDimsChanged() {
 }
 
 void MainWindow::updateTitle() {
-	QString title = QString("ttptt: tim-to-png-to-tim v%1")
+	QString title = QString("ttptt: tim-to-picture-to-tim v%1")
 						.arg(QCoreApplication::applicationVersion());
 	if (!m_sourcePath.isEmpty()) {
 		title += " — " + QFileInfo(m_sourcePath).fileName() + (m_dirty ? " *" : "");
