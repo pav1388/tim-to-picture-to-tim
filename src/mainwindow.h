@@ -148,13 +148,6 @@ private:
 	bool m_suppressSizeTrace = false;
 	bool m_darkTheme = false;
 	bool m_previewRefreshPending = false;
-	QString m_batchImageFormat = "png";
-	QSize m_previewSrcSize;
-	QSize m_previewDisplaySize;
-	QString m_sourcePath;
-	QString m_ttpttPath;
-	QString m_sourceStem;
-	QStringList m_recentFiles;
 	bool m_autoSaveAct = true;
 	bool m_autoSavePal = false;
 	bool m_autoSaveGpl = false;
@@ -167,6 +160,15 @@ private:
 	bool m_saveAllPalettesBatch = false;
 	bool m_showLog = false;
 	bool m_shuttingDown = false;
+	
+	QString m_batchImageFormat = "png";
+	QSize m_previewSrcSize;
+	QSize m_previewDisplaySize;
+	QString m_sourcePath;
+	QString m_ttpttPath;
+	QString m_sourceStem;
+	QStringList m_recentFiles;
+	QString defaultSavePath(const QString &filename) const;
 
 	QAction *m_batchAllPalettesAction = nullptr;
 	QAction *m_manualAllPalettesAction = nullptr;
@@ -202,7 +204,8 @@ private:
 	QPushButton *m_palNextBtn = nullptr;
 	QPushButton *m_imgPrevBtn = nullptr;
 	QPushButton *m_imgNextBtn = nullptr;
-
+	QPushButton *m_stpBtn = nullptr;
+	
 	QMenu *m_fileMenu = nullptr;
 	QMenu *m_recentSubmenu = nullptr;
 	QAction *m_stpAction = nullptr;
