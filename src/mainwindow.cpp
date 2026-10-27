@@ -1,4 +1,5 @@
 // ttptt — TIM <-> Picture converter for PlayStation 1
+// File: mainwindow.cpp
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -1483,7 +1484,12 @@ QStringList MainWindow::importImagesForTtptt(const QString &dirPath, const QStri
 			const QString preferredName = singleImage
 				? (stem + ".png")
 				: QString("%1_img%2.png").arg(stem).arg(it.globalIdx, 2, 10, QChar('0'));
-			im = Placeholder::makeMissingImage(w, h, preferredName);
+
+			QVector<QColor> palColors;
+			if (g.hasClut && !g.clut.isEmpty())
+				palColors = Tim::safeClutFlat(g, nullptr, nullptr);
+
+			im = Placeholder::makeMissingImage(w, h, preferredName, palColors);
 			qWarning() << "Нет изображения для image #" << it.globalIdx
 					   << "- вставлена заглушка" << w << "x" << h;
 		}
@@ -2119,9 +2125,7 @@ void MainWindow::refreshPreview() {
 			return;
 		}
 		QImage img = Placeholder::renderPlaceholder(
-			sz, font(),
-			tr("Откройте TIM"),
-			tr("PS1 навсегда · ttptt"));
+			sz, font(), tr("Откройте TIM"), tr("PS1 навсегда · ttptt"));
 		m_previewLabel->setPixmap(img.isNull() ? QPixmap()
 											   : QPixmap::fromImage(img));
 		return;

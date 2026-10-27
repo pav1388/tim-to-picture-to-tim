@@ -1,4 +1,5 @@
 // ttptt — TIM <-> Picture converter for PlayStation 1
+// File: palettes.h
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
