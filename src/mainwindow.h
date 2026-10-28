@@ -122,6 +122,7 @@ private:
     bool loadTtpttFromPath(const QString &path, bool silent = false);
     QStringList importImagesForTtptt(const QString &dirPath, const QString &stem);
     bool confirmDiscard();
+	bool blockedByBatch();
     bool replaceImageFromPath(const QString &path);
     bool importPaletteFromPath(const QString &path);
     void dispatchDroppedFile(const QString &path);

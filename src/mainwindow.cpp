@@ -65,6 +65,8 @@
 // #include <QSize>
 // #include <QStyle>
 
+#define TTPTT_PROJECT_VERSION 1
+
 static const QStringList kBppLabels = {"0 (4-bit)", "1 (8-bit)", "2 (16-bit)", "3 (24-bit)"};
 static const int kRecentLimit = 10;
 
@@ -153,17 +155,16 @@ static bool needsMultiPalSuffix(const Tim::Group &g, bool enabled) {
 static bool writeTtpttFile(const QString &path, const QVector<Tim::Group> &groups,
 						   const QString &sourcePath = QString(),
 						   int paletteRow = 0, int currentEntry = 0,
-						   bool zoomFit = true, bool showStp = false) {
+						   bool showStp = false) {
 	if (groups.isEmpty()) return false;
 
 	QJsonObject root;
-	root["version"]	  = 1;
-	root["app"]		  = "ttptt";
+	root["version"] = TTPTT_PROJECT_VERSION;
+	root["app"] = "ttptt";
 	if (!sourcePath.isEmpty())
 		root["sourcePath"] = sourcePath;
 	root["paletteRow"]   = paletteRow;
 	root["currentEntry"] = currentEntry;
-	root["zoomFit"]	  = zoomFit;
 	root["showStp"]	  = showStp;
 
 	QJsonArray garr;
@@ -345,7 +346,7 @@ void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
 
 		if (saveMeta) {
 			QString metaPath = dir.filePath(stem + ".ttptt");
-			if (writeTtpttFile(metaPath, groups, dir.filePath(fname), 0, 0, true, false))
+			if (writeTtpttFile(metaPath, groups, dir.filePath(fname), 0, 0, false))
 				++metaSaved;
 			else
 				metaErrors << fname + ": метаданные не сохранены";
@@ -430,7 +431,8 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 	QDir dir(folder);
 	QStringList files = dir.entryList(QDir::Files);
 	files.sort();
-	int replaced = 0, missing = 0, timFiles = 0, changedFiles = 0, skipped = 0, normalized = 0;
+	int replaced = 0, missing = 0, timFiles = 0, changedFiles = 0;
+	int stpLossCount = 0, skipped = 0, normalized = 0;
 	QStringList errors;
 	QStringList sizeMismatches;
 	bool openedFileRewritten = false;
@@ -465,17 +467,25 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 
 				QImage im(imagePath);
 				if (im.isNull()) {
-					errors << imgName + " → " + fname + ": open failed";
+					errors << imgName + " -> " + fname + ": open failed";
 					continue;
 				}
+				const bool bmpLossy = imgName.endsWith(".bmp", Qt::CaseInsensitive) &&
+									  g.bpp == 2 &&
+									  imageHasStpPixels(g.images[i], g.bpp);
+				if (bmpLossy) {
+					emit logMsg(QString("%1 -> %2: BMP стирает STP-биты в 16bpp")
+									.arg(imgName, fname));
+					++stpLossCount;
+				}
 				if (im.width() != w || im.height() != h) {
-					sizeMismatches << QString("%1 → %2: image %3x%4, TIM %5x%6")
+					sizeMismatches << QString("%1 -> %2: image %3x%4, TIM %5x%6")
 						.arg(imgName, fname)
 						.arg(im.width()).arg(im.height()).arg(w).arg(h);
 				}
 				im = Tim::normalizeImageForTim(im, w, h);
 				if (!Tim::applyEncodedToImage(g, i, im, 0)) {
-					errors << imgName + " → " + fname + ": encode failed";
+					errors << imgName + " -> " + fname + ": encode failed";
 					continue;
 				}
 				changed = true;
@@ -487,7 +497,7 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 		QByteArray newBytes = Tim::rebuildAll(groups);
 		if (newBytes.size() != data.size()) {
 			++normalized;
-			emit logMsg(QString("%1: !!! ВНИМАНИЕ: нормализован %2 → %3")
+			emit logMsg(QString("%1: !!! ВНИМАНИЕ: нормализован %2 -> %3")
 				.arg(fname).arg(data.size()).arg(newBytes.size()));
 		}
 		QFile out(path);
@@ -507,6 +517,10 @@ void BatchWorker::runReplace(const QString &folder, const QString &currentSource
 	QString msg = QString("Изменено %1 TIM-файлов, заменено %2 изображений "
 						  "(пропущено не-TIM: %3, не найдено изображений: %4, нормализовано: %5).")
 		.arg(changedFiles).arg(replaced).arg(skipped).arg(missing).arg(normalized);
+	if (stpLossCount > 0) {
+		msg += QString("\n\nВНИМАНИЕ: в %1 файле(ах) BMP-замена стёрла STP-биты "
+					   "в 16bpp-группах. Используйте PNG.").arg(stpLossCount);
+	}
 	emit finished(msg, errors, sizeMismatches, openedFileRewritten);
 }
 
@@ -685,8 +699,8 @@ void MainWindow::buildMenus() {
     em->addAction(tr("Применить метаданные"), this, &MainWindow::applyMetadata, QKeySequence("Ctrl+Return"));
     em->addAction(tr("Сбросить изменения"), this, &MainWindow::resetMetadata, QKeySequence("Ctrl+Shift+R"));
     em->addSeparator();
-    em->addAction(tr("Конвертировать 24bpp → 16bpp"), this, &MainWindow::convertTo16bpp);
-    em->addAction(tr("Конвертировать 16bpp → 24bpp"), this, &MainWindow::convertTo24bpp);
+    em->addAction(tr("Конвертировать 24bpp -> 16bpp"), this, &MainWindow::convertTo16bpp);
+    em->addAction(tr("Конвертировать 16bpp -> 24bpp"), this, &MainWindow::convertTo24bpp);
     em->addSeparator();
     em->addAction(tr("Разделить изображение на два"), this, &MainWindow::splitImage);
     em->addAction(tr("Слить со следующим"), this, &MainWindow::mergeWithNext);
@@ -1056,10 +1070,12 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 	if (hasData) {
 		group.warnings << "Сырой TIM";
 		groups << group;
+
 	} else {
 		if (silent) return false;
 		if (showMsgBox(this, QMessageBox::Question, "Не распознан", "Открыть как пустой?",
-					   QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) return false;
+					   QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes)
+			return false;
 
 		Tim::Group g;
 		g.flags = 0x18;
@@ -1074,11 +1090,12 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 		g.clut = QByteArray(32, '\0');
 
 		Tim::Image im;
-		im.header.size = 12;
 		im.header.x = 0;
 		im.header.y = 0;
 		im.header.widthWords = 16;
 		im.header.height = 1;
+		im.data = QByteArray(32, '\0');
+		im.header.size = 12 + im.data.size();
 		g.images << im;
 
 		g.extra = data;
@@ -1107,7 +1124,7 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 }
 
 void MainWindow::openTim() {
-	if (m_batchRunning) return;
+	if (blockedByBatch()) return;
 	QString p = QFileDialog::getOpenFileName(this, "TIM / Метаданные", initialDir(),
 		"TIM и метаданные (*.tim *.ttptt);;TIM (*.tim);;Метаданные ttptt (*.ttptt);;All (*.*)");
 	if (p.isEmpty()) return;
@@ -1118,7 +1135,7 @@ void MainWindow::openTim() {
 }
 
 void MainWindow::openRawTim() { 
-	if (m_batchRunning) return; 
+	if (blockedByBatch()) return; 
 	QString p = QFileDialog::getOpenFileName(this, "Raw", initialDir(), "All (*.*)"); 
 	if (!p.isEmpty()) loadRawTimFromPath(p); 
 }
@@ -1231,7 +1248,7 @@ int MainWindow::saveAllPalettesForImage(const Tim::Group &g, int imgIdx,
 }
 
 void MainWindow::saveImage() {
-    if (m_batchRunning) return;
+    if (blockedByBatch()) return;
     int ii = -1;
     Tim::Group *g = currentGroup(&ii);
     if (!g) return;
@@ -1280,9 +1297,9 @@ void MainWindow::saveImage() {
     if (ext == ".bmp" && g->bpp == 2 &&
         imageHasStpPixels(g->images[ii], g->bpp)) {
         if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
-            tr("В изображении есть STP-пиксели (полупрозрачность).\n"
-               "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
-               "STP-биты будут сброшены. Используйте PNG.\n\nПродолжить?"),
+            tr("В изображении 16bpp есть STP-пиксели (полупрозрачность).\n"
+               "При сохранении в BMP STP-биты будут сброшены.\n"
+			   "Используйте PNG.\n\nПродолжить?"),
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::No) != QMessageBox::Yes)
             return;
@@ -1309,14 +1326,15 @@ void MainWindow::saveImage() {
     autoSavePalettesHelper(*g, chosenDir + "/" + chosenBase,
                            m_autoSaveAct, m_autoSavePal, m_autoSaveGpl);
 
-    if (m_autoSaveTtptt) {
-        QString ttpttPath = chosenDir + "/" + m_sourceStem + ".ttptt";
-        if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
-                           m_currentEntry, m_zoomFit, m_showStp)) {
-            m_ttpttPath = ttpttPath;
-            qInfo() << "Метаданные сохранены рядом с изображением:" << ttpttPath;
-        }
-    }
+
+	if (m_autoSaveTtptt) {
+		QString ttpttPath = chosenDir + "/" + chosenBase + ".ttptt";
+		if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
+						   m_currentEntry, m_showStp)) {
+			m_ttpttPath = ttpttPath;
+			qInfo() << "Метаданные сохранены рядом с изображением:" << ttpttPath;
+		}
+	}
 
     const QString what = multiPal
         ? QString("%1 файлов (%2_pal01..%2_pal%3%4)")
@@ -1372,7 +1390,7 @@ void MainWindow::saveAllImages() {
         if (stpGroups > 0) {
             if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
                 tr("В %1 группе(ах) есть 16bpp-изображения со STP-пикселями.\n"
-                   "BMP не хранит альфа-канал — при обратном TIM→BMP→TIM\n"
+                   "BMP не хранит альфа-канал — при обратном TIM->BMP->TIM\n"
                    "STP-биты будут сброшены. Используйте PNG.\n\nПродолжить?").arg(stpGroups),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                 return;
@@ -1442,7 +1460,7 @@ void MainWindow::saveAllImages() {
     if (m_autoSaveTtptt) {
         QString ttpttPath = dir.filePath(stem + ".ttptt");
         if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
-                           m_currentEntry, m_zoomFit, m_showStp))
+                           m_currentEntry, m_showStp))
             qInfo() << "Метаданные сохранены рядом с изображениями:" << ttpttPath;
         else
             qWarning() << "Не удалось сохранить метаданные:" << ttpttPath;
@@ -1458,7 +1476,7 @@ void MainWindow::saveAllImages() {
 }
 
 void MainWindow::openTtptt() {
-	if (m_batchRunning) return;
+	if (blockedByBatch()) return;
 	QString p = QFileDialog::getOpenFileName(this, "Метаданные ttptt", initialDir(),
 		"Метаданные ttptt (*.ttptt);;All (*.*)");
 	if (p.isEmpty()) return;
@@ -1467,7 +1485,7 @@ void MainWindow::openTtptt() {
 
 bool MainWindow::writeTtpttToPath(const QString &path) {
 	if (!writeTtpttFile(path, m_groups, m_sourcePath, m_paletteRow,
-						m_currentEntry, m_zoomFit, m_showStp)) {
+						m_currentEntry, m_showStp)) {
 		showMsgBox(this, QMessageBox::Critical, "Ошибка",
 				   "Не удалось сохранить метаданные:\n" + path);
 		return false;
@@ -1535,6 +1553,14 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 			showMsgBox(this, QMessageBox::Critical, "Ошибка", "В файле нет данных групп");
 		return false;
 	}
+	
+	int versionTtptt = root["versionTtptt"].toInt(0);
+	if (versionTtptt < 1 || versionTtptt > TTPTT_PROJECT_VERSION) {
+		qWarning() << "Парсер .ttptt: неизвестная версия метаданных - " << versionTtptt;
+	}
+	if (versionTtptt < TTPTT_PROJECT_VERSION) {
+		qWarning() << "Парсер .ttptt: старая версия метаданных, возможны ошибки - " << versionTtptt;
+	}
 
 	QVector<Tim::Group> groups;
 	for (const QJsonValue &v : root["groups"].toArray())
@@ -1561,9 +1587,9 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	m_currentEntry = m_entries.isEmpty() ? -1 : qBound(0, curEntry, m_entries.size() - 1);
 
 	m_paletteRow = qMax(0, root["paletteRow"].toInt(0));
-	if (root.contains("zoomFit")) m_zoomFit = root["zoomFit"].toBool();
 	if (root.contains("showStp")) m_showStp = root["showStp"].toBool();
-
+	if (m_stpAction) m_stpAction->setChecked(m_showStp);
+	if (m_stpBtn)    m_stpBtn->setChecked(m_showStp);
 	QString sourcePath = root["sourcePath"].toString();
 
 	m_sourcePath.clear();
@@ -1671,18 +1697,21 @@ void MainWindow::closeFile() {
 }
 
 void MainWindow::prevImage() {
+	if (blockedByBatch()) return;
 	if (m_currentEntry > 0) {
 		--m_currentEntry; refreshAll();
 	} 
 }
 
-void MainWindow::nextImage() { 
+void MainWindow::nextImage() {
+	if (blockedByBatch()) return;
 	if (m_currentEntry < m_entries.size() - 1) {
 		++m_currentEntry; refreshAll();
 	}
 }
 
 void MainWindow::prevPaletteRow() {
+	if (blockedByBatch()) return;
     Tim::Group *g = currentGroup();
     if (g && g->hasClut && m_paletteRow > 0) {
         --m_paletteRow;
@@ -1693,6 +1722,7 @@ void MainWindow::prevPaletteRow() {
 }
 
 void MainWindow::nextPaletteRow() {
+	if (blockedByBatch()) return;
     Tim::Group *g = currentGroup();
     if (g && g->hasClut &&
         m_paletteRow < qMax(1, int(g->clutHeader.height)) - 1) {
@@ -1728,6 +1758,7 @@ void MainWindow::toggleLogWindow() {
 }
 
 void MainWindow::onBppChanged(int index) {
+	if (blockedByBatch()) return;
     if (m_suppressSizeTrace) return;
     if (index < 0 || index > 3) return;
 
@@ -1750,7 +1781,7 @@ void MainWindow::onBppChanged(int index) {
 }
 
 void MainWindow::applyMetadata() {
-    if (m_batchRunning) return;
+    if (blockedByBatch()) return;
     int ii = -1; Tim::Group *g = currentGroup(&ii); if (!g) return;
     int bpp = m_bppCombo->currentIndex(); if (bpp < 0 || bpp > 3) return;
     g->flags = quint32(bpp) | (m_hasClutCheck->isChecked() ? 0x8 : 0) | (m_hasImageCheck->isChecked() ? 0x10 : 0);
@@ -1794,6 +1825,7 @@ void MainWindow::applyMetadata() {
 }
 
 void MainWindow::resetMetadata() {
+	if (blockedByBatch()) return;
     if (!m_sourcePath.isEmpty()) {
         qInfo() << "Сброс метаданных — перечитывание" << QFileInfo(m_sourcePath).fileName();
         loadTimFromPath(m_sourcePath, true);
@@ -1809,31 +1841,36 @@ void MainWindow::convertTo16bpp() { convertBpp(2); }
 void MainWindow::convertTo24bpp() { convertBpp(3); }
 
 void MainWindow::convertBpp(int targetBpp) {
-    if (m_batchRunning) return;
+    if (blockedByBatch()) return;
     int ii = -1;
     Tim::Group *g = currentGroup(&ii);
     if (!g || ii < 0) return;
 
-    int currentBpp = g->bpp;
+    const int currentBpp = g->bpp;
     if (currentBpp == targetBpp ||
         (currentBpp != 2 && currentBpp != 3) ||
         (targetBpp  != 2 && targetBpp  != 3)) return;
 
-    int oldW = Tim::widthWordsToPixels(currentBpp, g->images[ii].header.widthWords);
-    int oldH = g->images[ii].header.height;
+    const int oldW = Tim::widthWordsToPixels(currentBpp, g->images[ii].header.widthWords);
+    const int oldH = g->images[ii].header.height;
 
     QImage img = Tim::decodeImage(*g, ii, m_paletteRow, -1);
     if (img.isNull()) return;
 
+    const quint16 oldWW  = g->images[ii].header.widthWords;
+    const quint32 oldSz  = g->images[ii].header.size;
+
     g->bpp   = quint8(targetBpp);
     g->flags = (g->flags & ~0x7u) | quint32(targetBpp);
-    g->images[ii].header.widthWords =
-        quint16((targetBpp == 2) ? oldW : Tim::pixelsToWords(targetBpp, oldW));
+    g->images[ii].header.widthWords = quint16(Tim::pixelsToWords(targetBpp, oldW));
 
     QByteArray newData = Tim::encodeImage(img, *g, g->images[ii].header, m_paletteRow);
     if (newData.isEmpty()) {
         g->bpp   = quint8(currentBpp);
         g->flags = (g->flags & ~0x7u) | quint32(currentBpp);
+        g->images[ii].header.widthWords = oldWW;
+        g->images[ii].header.size      = oldSz;
+        setStatus("Конвертация не удалась — изменения отменены");
         return;
     }
     g->images[ii].data = newData;
@@ -1842,53 +1879,127 @@ void MainWindow::convertBpp(int targetBpp) {
     rebuildAndReparse(true);
     m_dirty = true;
     updateTitle();
-
     qInfo() << QString("Конвертация bpp: %1bpp → %2bpp (%3x%4)")
         .arg(currentBpp * 8).arg(targetBpp * 8).arg(oldW).arg(oldH);
 }
 
 void MainWindow::splitImage() {
-	if (m_batchRunning) return;
-	int ii = -1; Tim::Group *g = currentGroup(&ii); if (!g || ii < 0) return;
-	int bpp = g->bpp; int width = Tim::widthWordsToPixels(bpp, g->images[ii].header.widthWords); int height = g->images[ii].header.height;
-	if (width < 2 || width % 2 != 0) return;
-	int halfW = width / 2; int halfWW = Tim::pixelsToWords(bpp, halfW);
-	QImage full = Tim::decodeImage(*g, ii, m_paletteRow, -1); if (full.isNull()) return;
-	QImage left = full.copy(0, 0, halfW, height); QImage right = full.copy(halfW, 0, halfW, height);
-	Tim::Image imL, imR;
-	imL.header = g->images[ii].header; imL.header.widthWords = quint16(halfWW);
-	imL.data = Tim::encodeImage(left, *g, imL.header, m_paletteRow); imL.header.size = 12 + imL.data.size();
-	imR.header = g->images[ii].header; imR.header.widthWords = quint16(halfWW);
-	imR.data = Tim::encodeImage(right, *g, imR.header, m_paletteRow); imR.header.size = 12 + imR.data.size();
-	g->images[ii] = imL; g->images.insert(ii + 1, imR);
-	rebuildAndReparse(true); m_dirty = true; updateTitle();
-	qInfo() << QString("Изображение разделено: %1x%2 → два %3x%4")
-		.arg(width).arg(height).arg(halfW).arg(height);
+    if (blockedByBatch()) return;
+    int ii = -1;
+    Tim::Group *g = currentGroup(&ii);
+    if (!g || ii < 0) return;
+
+    const int bpp        = g->bpp;
+    const int widthWords = g->images[ii].header.widthWords;
+    const int height     = g->images[ii].header.height;
+
+    if (widthWords < 2) {
+        setStatus("Нельзя разделить: слишком узкое изображение");
+        return;
+    }
+    if (widthWords % 2 != 0) {
+        setStatus("Нельзя разделить: нечётное число 16-битных слов в ширине");
+        return;
+    }
+
+    const int halfWW = widthWords / 2;
+    const int halfW  = Tim::widthWordsToPixels(bpp, halfWW);
+
+    QImage full = Tim::decodeImage(*g, ii, m_paletteRow, -1);
+    if (full.isNull()) return;
+
+    QImage left  = full.copy(0,     0, halfW, height);
+    QImage right = full.copy(halfW, 0, halfW, height);
+
+    Tim::Image imL, imR;
+    imL.header = g->images[ii].header;
+    imL.header.widthWords = quint16(halfWW);
+    imL.data = Tim::encodeImage(left, *g, imL.header, m_paletteRow);
+    if (imL.data.isEmpty()) {
+        setStatus("Не удалось закодировать левую половину");
+        return;
+    }
+    imL.header.size = 12 + imL.data.size();
+
+    imR.header = g->images[ii].header;
+    imR.header.widthWords = quint16(halfWW);
+    imR.header.x = quint16(g->images[ii].header.x + halfW);
+    imR.data = Tim::encodeImage(right, *g, imR.header, m_paletteRow);
+    if (imR.data.isEmpty()) {
+        setStatus("Не удалось закодировать правую половину");
+        return;
+    }
+    imR.header.size = 12 + imR.data.size();
+
+    g->images[ii] = imL;
+    g->images.insert(ii + 1, imR);
+    rebuildAndReparse(true);
+    m_dirty = true;
+    updateTitle();
+    qInfo() << QString("Изображение разделено: %1x%2 → два %3x%4")
+        .arg(Tim::widthWordsToPixels(bpp, widthWords)).arg(height)
+        .arg(halfW).arg(height);
 }
 
 void MainWindow::mergeWithNext() { mergeImages(true); }
 void MainWindow::mergeWithPrev() { mergeImages(false); }
 
 void MainWindow::mergeImages(bool withNext) {
-	if (m_batchRunning) return;
-	int ii = -1; Tim::Group *g = currentGroup(&ii); if (!g || ii < 0) return;
-	int idx1 = withNext ? ii : ii - 1; int idx2 = withNext ? ii + 1 : ii;
-	if (idx1 < 0 || idx2 >= g->images.size()) return;
-	int bpp = g->bpp; int w1 = Tim::widthWordsToPixels(bpp, g->images[idx1].header.widthWords);
-	int w2 = Tim::widthWordsToPixels(bpp, g->images[idx2].header.widthWords);
-	int h1 = g->images[idx1].header.height; if (h1 != g->images[idx2].header.height) return;
-	int totalW = w1 + w2; int newWW = Tim::pixelsToWords(bpp, totalW);
-	QImage i1 = Tim::decodeImage(*g, idx1, m_paletteRow, -1); QImage i2 = Tim::decodeImage(*g, idx2, m_paletteRow, -1);
-	if (i1.isNull() || i2.isNull()) return;
-	QImage merged(totalW, h1, QImage::Format_ARGB32); merged.fill(Qt::transparent);
-	QPainter p(&merged); p.drawImage(0, 0, i1); p.drawImage(w1, 0, i2); p.end();
-	Tim::Image mergedIm; mergedIm.header = g->images[idx1].header; mergedIm.header.widthWords = quint16(newWW);
-	mergedIm.data = Tim::encodeImage(merged, *g, mergedIm.header, m_paletteRow); mergedIm.header.size = 12 + mergedIm.data.size();
-	g->images.removeAt(idx2); g->images.removeAt(idx1); g->images.insert(idx1, mergedIm);
-	if (!withNext) m_currentEntry = qMax(0, m_currentEntry - 1);
-	rebuildAndReparse(true); m_dirty = true; updateTitle();
-	qInfo() << QString("Изображения слиты: %1x%2 + %3x%4 → %5x%6")
-		.arg(w1).arg(h1).arg(w2).arg(h1).arg(totalW).arg(h1);
+    if (blockedByBatch()) return;
+    int ii = -1;
+    Tim::Group *g = currentGroup(&ii);
+    if (!g || ii < 0) return;
+
+    int idx1 = withNext ? ii : ii - 1;
+    int idx2 = withNext ? ii + 1 : ii;
+    if (idx1 < 0 || idx2 >= g->images.size()) return;
+
+    const int bpp = g->bpp;
+    const int w1  = Tim::widthWordsToPixels(bpp, g->images[idx1].header.widthWords);
+    const int w2  = Tim::widthWordsToPixels(bpp, g->images[idx2].header.widthWords);
+    const int h1  = g->images[idx1].header.height;
+    const int h2  = g->images[idx2].header.height;
+
+    if (h1 != h2) {
+        setStatus("Нельзя слить: разная высота изображений");
+        return;
+    }
+
+    QImage i1 = Tim::decodeImage(*g, idx1, m_paletteRow, -1);
+    QImage i2 = Tim::decodeImage(*g, idx2, m_paletteRow, -1);
+    if (i1.isNull() || i2.isNull()) return;
+
+    const int totalW = w1 + w2;
+    const int newWW  = Tim::pixelsToWords(bpp, totalW);
+    const int actualW = Tim::widthWordsToPixels(bpp, newWW);
+
+    QImage merged(actualW, h1, QImage::Format_ARGB32);
+    merged.fill(Qt::transparent);
+    {
+        QPainter p(&merged);
+        p.drawImage(0,  0, i1);
+        p.drawImage(w1, 0, i2);
+    }
+
+    Tim::Image mergedIm;
+    mergedIm.header = g->images[idx1].header;
+    mergedIm.header.widthWords = quint16(newWW);
+    mergedIm.data = Tim::encodeImage(merged, *g, mergedIm.header, m_paletteRow);
+    if (mergedIm.data.isEmpty()) {
+        setStatus("Не удалось закодировать слитое изображение");
+        return;
+    }
+    mergedIm.header.size = 12 + mergedIm.data.size();
+
+    g->images.removeAt(idx2);
+    g->images.removeAt(idx1);
+    g->images.insert(idx1, mergedIm);
+    if (!withNext) m_currentEntry = qMax(0, m_currentEntry - 1);
+    rebuildAndReparse(true);
+    m_dirty = true;
+    updateTitle();
+    qInfo() << QString("Изображения слиты: %1x%2 + %3x%4 → %5x%6")
+        .arg(w1).arg(h1).arg(w2).arg(h2).arg(actualW).arg(h1);
 }
 
 void MainWindow::rebuildAndReparse(bool preserveEntry) {
@@ -1902,6 +2013,7 @@ void MainWindow::rebuildAndReparse(bool preserveEntry) {
 }
 
 void MainWindow::exportPalette() {
+	if (blockedByBatch()) return;
 	Tim::Group *g = currentGroup();
 	if (!g || g->clut.isEmpty()) return;
 
@@ -1939,6 +2051,7 @@ void MainWindow::exportPalette() {
 }
 
 void MainWindow::importPalette() {
+	if (blockedByBatch()) return;
 	Tim::Group *g = currentGroup();
 	if (!g || !g->hasClut) return;
 
@@ -1951,6 +2064,7 @@ void MainWindow::importPalette() {
 }
 
 bool MainWindow::importPaletteFromPath(const QString &path) {
+	if (blockedByBatch()) return false;
 	Tim::Group *g = currentGroup(); if (!g || !g->hasClut) return false;
 	QString err; Palettes::Loaded l = Palettes::loadAny(path, &err); if (!l.valid) return false;
 	int target = int(g->clutHeader.widthWords) * qMax<int>(1, g->clutHeader.height);
@@ -1965,58 +2079,83 @@ bool MainWindow::importPaletteFromPath(const QString &path) {
 }
 
 void MainWindow::replaceImage() {
-	if (m_batchRunning) return;
-	int ii = -1; Tim::Group *g = currentGroup(&ii); if (!g || ii < 0) return;
-	int w = Tim::widthWordsToPixels(g->bpp, g->images[ii].header.widthWords); int h = g->images[ii].header.height;
+	if (blockedByBatch()) return;
+	int ii = -1; Tim::Group *g = currentGroup(&ii);
+	if (!g || ii < 0) return;
+	int w = Tim::widthWordsToPixels(g->bpp, g->images[ii].header.widthWords);
+	int h = g->images[ii].header.height;
 	QString path = QFileDialog::getOpenFileName(this, QString("Img (%1x%2)").arg(w).arg(h), initialDir(), "Img (*.png *.bmp)");
 	if (!path.isEmpty()) replaceImageFromPath(path);
 }
 
 bool MainWindow::replaceImageFromPath(const QString &path) {
-	int ii = -1; Tim::Group *g = currentGroup(&ii); if (!g || ii < 0) return false;
-	QImage img(path); if (img.isNull()) return false;
+    if (blockedByBatch()) return false;
+    int ii = -1;
+    Tim::Group *g = currentGroup(&ii);
+    if (!g || ii < 0) return false;
 
-	const int bpp = g->bpp;
-	auto &h = g->images[ii].header;
-	const int oldWW = h.widthWords;
-	const int oldH  = h.height;
-	const int oldW  = Tim::widthWordsToPixels(bpp, oldWW);
+    QImage img(path);
+    if (img.isNull()) return false;
 
-	const int newWW	= Tim::pixelsToWords(bpp, img.width());
-	const int actualW  = Tim::widthWordsToPixels(bpp, newWW);
-	const int newH	 = img.height();
-	const bool sizeChanged = (actualW != oldW || newH != oldH);
-	const bool padNeeded   = (img.width() != actualW);
+    if (QFileInfo(path).suffix().toLower() == "bmp" &&
+        g->bpp == 2 && imageHasStpPixels(g->images[ii], g->bpp)) {
+        if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
+            tr("В текущем 16bpp-изображении есть STP-пиксели (полупрозрачность).\n"
+               "BMP не хранит альфа-канал — STP-биты будут сброшены.\n\nПродолжить?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+            return false;
+    }
 
-	qInfo() << "Замена изображения из" << QFileInfo(path).fileName();
+    const int bpp = g->bpp;
+    auto &h = g->images[ii].header;
+    const int oldWW = h.widthWords;
+    const int oldH  = h.height;
+    const int oldW  = Tim::widthWordsToPixels(bpp, oldWW);
 
-	if (sizeChanged || padNeeded) {
-		QString msg = QString("TIM заголовок изображения будет обновлён по файлу:\n"
-							  "  файл: %1x%2\n"
-							  "  было: width_words=%3, height=%4 (%5x%6)\n"
-							  "  станет: width_words=%7, height=%8 (%9x%10)")
-			.arg(img.width()).arg(img.height())
-			.arg(oldWW).arg(oldH).arg(oldW).arg(oldH)
-			.arg(newWW).arg(newH).arg(actualW).arg(newH);
-		if (padNeeded) {
-			msg += QString("\n\nШирина будет округлена до %1 пикс. (%2bpp, word boundary).")
-				.arg(actualW).arg(bpp * 8);
-		}
-		if (showMsgBox(this, QMessageBox::Question, "Замена изображения", msg,
-					   QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) {
-			qInfo() << "Замена изображения отменена пользователем";
-			return false;
-		}
-	}
+    const int newWW    = Tim::pixelsToWords(bpp, img.width());
+    const int actualW  = Tim::widthWordsToPixels(bpp, newWW);
+    const int newH     = img.height();
+    const bool sizeChanged = (actualW != oldW || newH != oldH);
+    const bool padNeeded   = (img.width() != actualW);
 
-	img = Tim::normalizeImageForTim(img, actualW, newH);
+    qInfo() << "Замена изображения из" << QFileInfo(path).fileName();
 
-	h.widthWords = quint16(newWW);
-	h.height	 = quint16(newH);
+    if (sizeChanged || padNeeded) {
+        QString msg = QString("TIM заголовок изображения будет обновлён по файлу:\n"
+                              "  файл: %1x%2\n"
+                              "  было: width_words=%3, height=%4 (%5x%6)\n"
+                              "  станет: width_words=%7, height=%8 (%9x%10)")
+            .arg(img.width()).arg(img.height())
+            .arg(oldWW).arg(oldH).arg(oldW).arg(oldH)
+            .arg(newWW).arg(newH).arg(actualW).arg(newH);
+
+        if (padNeeded) {
+            msg += QString("\n\nШирина будет дополнена прозрачными пикселями "
+                           "до %1 px (%2bpp, выравнивание по 16-битному слову).")
+                .arg(actualW).arg(bpp * 8);
+        }
+        if (showMsgBox(this, QMessageBox::Question, "Замена изображения", msg,
+                       QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) {
+            qInfo() << "Замена изображения отменена пользователем";
+            return false;
+        }
+    }
+
+    if (img.width() != actualW || img.height() != newH) {
+        QImage padded(actualW, newH, QImage::Format_ARGB32);
+        padded.fill(Qt::transparent);
+        QPainter pp(&padded);
+        pp.drawImage(0, 0, img);
+        pp.end();
+        img = padded;
+    }
+
+    h.widthWords = quint16(newWW);
+    h.height     = quint16(newH);
 
     if (!Tim::applyEncodedToImage(*g, ii, img, m_paletteRow)) return false;
 
-    const int newDataSize = g->images[ii].data.size();   // ← сохраняем ДО
+    const int newDataSize = g->images[ii].data.size();
     rememberDir(path);
     rebuildAndReparse(true);
     m_dirty = true;
@@ -2025,9 +2164,9 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
     qInfo() << QString("Изображение заменено: %1x%2 → %3x%4 (ww=%5, h=%6, %7 байт)")
         .arg(oldW).arg(oldH).arg(actualW).arg(newH).arg(newWW).arg(newH)
         .arg(newDataSize);
-	setStatus(QString("Изображение заменено: %1x%2 (было %3x%4)")
-		.arg(actualW).arg(newH).arg(oldW).arg(oldH));
-	return true;
+    setStatus(QString("Изображение заменено: %1x%2 (было %3x%4)")
+        .arg(actualW).arg(newH).arg(oldW).arg(oldH));
+    return true;
 }
 
 // =====================================================================
@@ -2311,6 +2450,7 @@ void MainWindow::onPaletteClick(int x) {
 }
 
 void MainWindow::editPaletteColor(int idx) {
+	if (blockedByBatch()) return;
 	Tim::Group *g = currentGroup();
 	if (!g || !g->hasClut || g->clut.isEmpty()) return;
 	int cw = g->clutHeader.widthWords;
@@ -2341,7 +2481,7 @@ void MainWindow::editPaletteColor(int idx) {
 	refreshPreview();
 	setStatus(QString("ИНДЕКС[%1] изменён: RGB=(%2,%3,%4)")
 		.arg(idx).arg(chosen.red()).arg(chosen.green()).arg(chosen.blue()));
-	qInfo() << QString("Палитра %1, индекс %2 → RGB(%3,%4,%5)")
+	qInfo() << QString("Палитра %1, индекс %2 -> RGB(%3,%4,%5)")
 		.arg(m_paletteRow).arg(idx)
 		.arg(chosen.red()).arg(chosen.green()).arg(chosen.blue());
 }
@@ -2497,22 +2637,17 @@ void MainWindow::dropEvent(QDropEvent *e) {
 }
 
 void MainWindow::dispatchDroppedFile(const QString &path) {
-	if (!QFileInfo::exists(path)) return;
-	QString ext = QFileInfo(path).suffix().toLower();
-	qInfo() << "Перетащен файл:" << QFileInfo(path).fileName();
+    if (!QFileInfo::exists(path)) return;
+	if (blockedByBatch()) return;
+    QString ext = QFileInfo(path).suffix().toLower();
 
-	if (ext == "png" || ext == "bmp") { replaceImageFromPath(path); return; }
-	if (ext == "pal" || ext == "act" || ext == "gpl") { importPaletteFromPath(path); return; }
-	if (m_batchRunning) { setStatus("Идет операция"); return; }
-
-	if (!confirmDiscard()) {
-		qInfo() << "Открытие отменено пользователем";
-		return;
-	}
-
-	if (loadTimFromPath(path, true)) return;
-	qInfo() << "Не удалось открыть как TIM, пробую как сырой TIM";
-	loadRawTimFromPath(path, false, true);
+    qInfo() << "Перетащен файл:" << QFileInfo(path).fileName();
+    if (ext == "png" || ext == "bmp") { replaceImageFromPath(path); return; }
+    if (ext == "pal" || ext == "act" || ext == "gpl") { importPaletteFromPath(path); return; }
+    if (!confirmDiscard()) { qInfo() << "Открытие отменено пользователем"; return; }
+    if (loadTimFromPath(path, true)) return;
+    qInfo() << "Не удалось открыть как TIM, пробую как сырой TIM";
+    loadRawTimFromPath(path, false, true);
 }
 
 void MainWindow::openPathFromCommandLine(const QString &path) {
@@ -2532,6 +2667,13 @@ void MainWindow::openPathFromCommandLine(const QString &path) {
 
 void MainWindow::setStatus(const QString &msg) { 
 	if (m_statusLabel) m_statusLabel->setText(msg);
+}
+
+bool MainWindow::blockedByBatch() {
+    if (!m_batchRunning) return false;
+    setStatus(tr("Идёт пакетная операция — действие отклонено"));
+    qInfo() << "Действие заблокировано: идёт пакетная операция";
+    return true;
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
@@ -2573,6 +2715,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
 }
 
 void MainWindow::registerFileAssociation(const QString &extIn) {
+	if (blockedByBatch()) return;
 #ifdef Q_OS_WIN
 	const QString ext = extIn.startsWith('.') ? extIn : ('.' + extIn);
 
@@ -2612,9 +2755,9 @@ void MainWindow::registerFileAssociation(const QString &extIn) {
 			   tr("Файлы %1 связаны с ttptt.\n\n"
 				  "Двойной клик по %1 в Проводнике открывает ttptt.\n"
 				  "Чтобы назначить ttptt программой по умолчанию — "
-				  "ПКМ по файлу → «Открыть с помощью» → "
+				  "ПКМ по файлу -> «Открыть с помощью» -> "
 				  "«Выбрать другое приложение».").arg(ext));
-	qInfo() << "Зарегистрирована ассоциация" << ext << "→" << exePath;
+	qInfo() << "Зарегистрирована ассоциация" << ext << "->" << exePath;
 #else
 	Q_UNUSED(extIn);
 	showMsgBox(this, QMessageBox::Information, tr("Ассоциация"),
@@ -2623,6 +2766,7 @@ void MainWindow::registerFileAssociation(const QString &extIn) {
 }
 
 void MainWindow::unregisterFileAssociation(const QString &extIn) {
+	if (blockedByBatch()) return;
 #ifdef Q_OS_WIN
 	const QString ext = extIn.startsWith('.') ? extIn : ('.' + extIn);
 

@@ -10,14 +10,15 @@
 namespace Tim {
 
 static QVector<quint16> readBgr555Words(const QByteArray &data, int needWords) {
-	QVector<quint16> out(needWords);
-	const uchar *p = reinterpret_cast<const uchar*>(data.constData());
-	int avail = data.size() / 2;
-	for (int i = 0; i < needWords; ++i) {
-		if (i < avail) out[i] = rd16(p + i * 2);
-		else out[i] = 0;
-	}
-	return out;
+    if (needWords < 0) needWords = 0;
+    int avail = data.size() / 2;
+    if (needWords > avail) needWords = avail;
+    if (needWords > 65536) needWords = 65536;
+    QVector<quint16> out(needWords);
+    const uchar *p = reinterpret_cast<const uchar*>(data.constData());
+    for (int i = 0; i < needWords; ++i)
+		out[i] = rd16(p + i * 2);
+    return out;
 }
 
 // Приведение QImage к размерам TIM-блока
@@ -40,36 +41,43 @@ bool applyEncodedToImage(Group &g, int imgIdx,
 }
 
 QVector<QRgb> getClutPalette(const Group &g, int paletteRow) {
-	QVector<QRgb> out;
-	if (!g.hasClut || g.clut.isEmpty()) return out;
-	int cw = g.clutHeader.widthWords;
-	int ch = qMax<int>(1, g.clutHeader.height);
-	paletteRow = qBound(0, paletteRow, ch - 1);
-	int need = cw * ch;
-	QVector<quint16> vals = readBgr555Words(g.clut, need);
-	int start = paletteRow * cw;
-	for (int i = start; i < start + cw && i < vals.size(); ++i)
-		out.append(bgr555ToRgb(vals[i]));
-	return out;
+    QVector<QRgb> out;
+    if (!g.hasClut || g.clut.isEmpty()) return out;
+    int cw = qMin<int>(g.clutHeader.widthWords, 4096);
+    int ch = qMin<int>(qMax<int>(1, g.clutHeader.height), 1024);
+    paletteRow = qBound(0, paletteRow, ch - 1);
+    int need = qMin(cw * ch, 65536);
+    QVector<quint16> vals = readBgr555Words(g.clut, need);
+    int start = paletteRow * cw;
+    for (int i = start; i < start + cw && i < vals.size(); ++i)
+        out.append(bgr555ToRgb(vals[i]));
+    return out;
 }
 
 QVector<QRgb> getClutPaletteRgba(const Group &g, int paletteRow) {
-	QVector<QRgb> out;
-	if (!g.hasClut || g.clut.isEmpty()) return out;
-	int cw = g.clutHeader.widthWords;
-	int ch = qMax<int>(1, g.clutHeader.height);
-	paletteRow = qBound(0, paletteRow, ch - 1);
-	int need = cw * ch;
-	QVector<quint16> vals = readBgr555Words(g.clut, need);
-	int start = paletteRow * cw;
-	for (int i = start; i < start + cw && i < vals.size(); ++i) {
-		quint16 c = vals[i];
-		int r = c & 0x1F, gg = (c >> 5) & 0x1F, b = (c >> 10) & 0x1F;
-		int a = (c & 0x8000) ? 128 : 255;
-		out.append(qRgba((r << 3) | (r >> 2), (gg << 3) | (gg >> 2),
-						 (b << 3) | (b >> 2), a));
-	}
-	return out;
+    QVector<QRgb> out;
+    if (!g.hasClut || g.clut.isEmpty()) return out;
+
+    int cw = qMin<int>(g.clutHeader.widthWords, 4096);
+    int ch = qMin<int>(qMax<int>(1, g.clutHeader.height), 1024);
+    paletteRow = qBound(0, paletteRow, ch - 1);
+
+    int need = qMin(cw * ch, 65536);
+    QVector<quint16> vals = readBgr555Words(g.clut, need);
+
+    int start = paletteRow * cw;
+    for (int i = start; i < start + cw && i < vals.size(); ++i) {
+        quint16 c = vals[i];
+        int r  = c & 0x1F;
+        int gg = (c >> 5) & 0x1F;
+        int b  = (c >> 10) & 0x1F;
+        int a  = (c & 0x8000) ? 128 : 255;
+        out.append(qRgba((r  << 3) | (r  >> 2),
+                         (gg << 3) | (gg >> 2),
+                         (b  << 3) | (b  >> 2),
+                         a));
+    }
+    return out;
 }
 
 QImage renderPaletteImage(const Group &g, int paletteRow) {

@@ -30,6 +30,25 @@ int pixelsToWords(int bpp, int px) {
 	}
 }
 
+static void warn(Group *g, const QString &msg)
+{
+    for (int i = 0; i < g->warnings.size(); ++i) {
+        const QString &cur = g->warnings[i];
+        if (cur == msg || cur.startsWith(msg + " (×")) {
+            int n = 2;
+            if (cur.startsWith(msg + " (×")) {
+                const int start = msg.length() + 3;
+                const int close = cur.indexOf(')', start);
+                if (close > start) n = cur.mid(start, close - start).toInt() + 1;
+            }
+            g->warnings[i] = QString("%1 (×%2)").arg(msg).arg(n);
+            return;
+        }
+    }
+    if (g->warnings.size() >= 32) return;
+    g->warnings << msg;
+}
+
 static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 					   bool checkSignature, Group *out) {
 	const int len = data.size();
@@ -37,12 +56,12 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 	if (offset + 8 > len) return false;
 
 	if (checkSignature) {
-		if (!data.startsWith(QByteArray("\x10\x00\x00\x00", 4))) return false;
-		quint32 magic = rd32(reinterpret_cast<const uchar*>(data.constData() + offset));
-		if (magic != 0x10) return false;
-		quint32 flags = rd32(reinterpret_cast<const uchar*>(data.constData() + offset + 4));
-		offset += 8;
-		out->flags = flags;
+		// if (!data.startsWith(QByteArray("\x10\x00\x00\x00", 4))) return false;
+        quint32 magic = rd32(reinterpret_cast<const uchar*>(data.constData() + offset));
+        if (magic != 0x10) return false;
+        quint32 flags = rd32(reinterpret_cast<const uchar*>(data.constData() + offset + 4));
+        offset += 8;
+        out->flags = flags;
 	} else {
 		if (data.mid(offset, 4) == QByteArray("\x10\x00\x00\x00", 4)) {
 			out->flags = rd32(reinterpret_cast<const uchar*>(data.constData() + offset + 4));
@@ -63,7 +82,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 	// ----- CLUT -----
 	if (out->hasClut) {
 		if (offset + 12 > len) {
-			out->warnings << QStringLiteral("Обрезан заголовок CLUT");
+			warn(out, QStringLiteral("Обрезан заголовок CLUT"));
 			out->clutHeader.size = 12;
 			out->clutHeader.x = 0;
 			out->clutHeader.y = 0;
@@ -77,7 +96,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 			quint16 cx = rd16(p + 4), cy = rd16(p + 6);
 			quint16 cw = rd16(p + 8), ch = rd16(p + 10);
 			if (size < 12 || size > 1024 * 1024) {
-				out->warnings << QStringLiteral("Неверный размер CLUT");
+				warn(out, QStringLiteral("Неверный размер CLUT"));
 				size = 12; cw = qMin<quint16>(cw, 256); ch = qMin<quint16>(ch, 16);
 			}
 			offset += 12;
@@ -86,7 +105,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 				int maxE = qMax(1, declared / 2);
 				if (int(cw) > maxE) { cw = quint16(qMin<int>(cw, maxE)); ch = 1; }
 				else ch = quint16(qMax(1, qMin<int>(ch, maxE / qMax(1, int(cw)))));
-				out->warnings << QStringLiteral("CLUT: cw*ch не соответствует size");
+				warn(out, QStringLiteral("CLUT: cw*ch не соответствует size"));
 			}
 			int need = int(size) - 12;
 			int avail = len - offset;
@@ -96,7 +115,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 			out->clutHeader.widthWords = cw;
 			out->clutHeader.height = ch;
 			if (avail < need) {
-				out->warnings << QStringLiteral("CLUT обрезан");
+				warn(out, QStringLiteral("CLUT обрезан"));
 				out->clut = data.mid(offset);
 				offset = len;
 			} else {
@@ -117,13 +136,13 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		quint16 iw = rd16(p + 8), ih = rd16(p + 10);
 
 		if (size < 12 || size > 100u * 1024 * 1024) {
-			out->warnings << QStringLiteral("Неверный размер блока image");
+			warn(out, QStringLiteral("Неверный размер блока image"));
 			offset += 12;
 			continue;
 		}
 		if (iw == 0 || ih == 0 || iw > 2048 || ih > 2048 ||
 			quint32(iw) * 2 * ih > 4u * 1024 * 1024) {
-			out->warnings << QStringLiteral("Нереалистичные размеры image");
+			warn(out, QStringLiteral("Нереалистичные размеры image"));
 			int remaining = len - offset;
 			offset += (int(size) >= 12 && int(size) <= remaining) ? int(size) : 12;
 			continue;
@@ -131,17 +150,20 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		int expected = int(iw) * 2 * int(ih);
 		int declared = int(size) - 12;
 		if (declared > 50 * 1024 * 1024) {
-			out->warnings << QStringLiteral("Слишком большой размер данных");
+			warn(out, QStringLiteral("Слишком большой размер данных"));
 			int remaining = len - offset;
 			offset += (int(size) >= 12 && int(size) <= remaining) ? int(size) : 12;
 			continue;
 		}
 		if (qAbs(declared - expected) > 4) {
-			out->warnings << QStringLiteral("Несоответствие размера image");
+			warn(out, QStringLiteral("Несоответствие размера image"));
 		}
 		int avail = len - offset - 12;
 		int dataLen = qMin(declared, avail);
-		if (dataLen <= 0) { out->warnings << QStringLiteral("Нет данных image"); break; }
+		if (dataLen <= 0) {
+			warn(out, QStringLiteral("Нет данных image"));
+			break;
+		}
 
 		Image im;
 		im.header.size = size;
@@ -156,19 +178,29 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		offset += advance;
 		++imgCount;
 		if (dataLen < declared) {
-			out->warnings << QStringLiteral("Данные image обрезаны");
+			warn(out, QStringLiteral("Данные image обрезаны"));
 			break;
 		}
 	}
 
 	if (out->images.isEmpty() && out->hasImage)
-		out->warnings << QStringLiteral("has_image=1, но image не найден");
+		warn(out, QStringLiteral("has_image=1, но image не найден"));
 	if (!out->images.isEmpty() && !out->hasImage)
-		out->warnings << QStringLiteral("Изображение есть, но has_image=0");
+		warn(out, QStringLiteral("Изображение есть, но has_image=0"));
 
+	// if (offset < len && data.mid(offset, 4) != QByteArray("\x10\x00\x00\x00", 4)) {
+		// out->extra = data.mid(offset);
+		// offset = len;
+	// }
 	if (offset < len && data.mid(offset, 4) != QByteArray("\x10\x00\x00\x00", 4)) {
-		out->extra = data.mid(offset);
-		offset = len;
+		int nextMagic = data.indexOf(QByteArray("\x10\x00\x00\x00", 4), offset);
+		if (nextMagic > offset) {
+			out->extra = data.mid(offset, nextMagic - offset);
+			offset = nextMagic;
+		} else {
+			out->extra = data.mid(offset);
+			offset = len;
+		}
 	}
 
 	*newOffset = offset;
@@ -336,4 +368,68 @@ Group groupFromJson(const QJsonObject &o) {
 	return g;
 }
 
+// Валидация .ttptt перед открытием (не настроена и может отрицательно сказаться
+// на процессе, так как нет достаточной практики при работы с tim)
+/* Group groupFromJson(const QJsonObject &o) {
+    Group g;
+    g.flags = quint32(o["flags"].toString().toULongLong());
+    g.bpp   = quint8(o["bpp"].toInt());
+
+    // ── защита от мусора ───────────────────────────────────────
+    if (g.bpp > 3) g.bpp = 0;
+    g.flags = (g.flags & ~0x7u) | g.bpp;   // согласовать bpp/flags
+
+    g.hasClut  = o["hasClut"].toBool();
+    g.hasImage = o["hasImage"].toBool();
+    g.startOffset = o["startOffset"].toInt();
+
+    if (o.contains("clutHeader"))
+        g.clutHeader = headerFromJson(o["clutHeader"].toObject());
+
+    if (g.clutHeader.size < 12) g.clutHeader.size = 12;
+    if (g.clutHeader.widthWords > 1024) g.clutHeader.widthWords = 1024;
+    if (g.clutHeader.height > 1024)     g.clutHeader.height = 1024;
+
+    g.clut = QByteArray::fromBase64(o["clut"].toString().toLatin1());
+    int maxClutData = int(g.clutHeader.widthWords) * int(g.clutHeader.height) * 2;
+    if (maxClutData > 4 * 1024 * 1024) maxClutData = 4 * 1024 * 1024;
+    if (g.clut.size() > maxClutData) g.clut = g.clut.left(maxClutData);
+    if (g.hasClut && int(g.clutHeader.size) - 12 < g.clut.size())
+        g.clutHeader.size = 12 + g.clut.size();
+
+    for (const QJsonValue &v : o["images"].toArray()) {
+        if (g.images.size() >= 100) break;   // лимит на группу
+        QJsonObject io = v.toObject();
+        Image im;
+        im.header = headerFromJson(io["header"].toObject());
+
+        if (im.header.size < 12) im.header.size = 12;
+        if (im.header.widthWords > 2048) im.header.widthWords = 2048;
+        if (im.header.height > 2048)     im.header.height = 2048;
+        if (im.header.widthWords == 0 || im.header.height == 0) continue;
+
+        // отсекаем абсурдно большие изображения
+        int pxW = widthWordsToPixels(g.bpp, im.header.widthWords);
+        int pxH = im.header.height;
+        if (qint64(pxW) * pxH > 16 * 1024 * 1024) continue;
+
+        int maxData = int(im.header.widthWords) * int(im.header.height) * 2;
+        if (maxData > 16 * 1024 * 1024) maxData = 16 * 1024 * 1024;
+
+        if (io.contains("data"))
+            im.data = QByteArray::fromBase64(io["data"].toString().toLatin1());
+        if (im.data.size() > maxData) im.data = im.data.left(maxData);
+        if (int(im.header.size) - 12 < im.data.size())
+            im.header.size = 12 + im.data.size();
+
+        g.images.append(im);
+    }
+
+    g.extra  = QByteArray::fromBase64(o["extra"].toString().toLatin1());
+    g.prefix = QByteArray::fromBase64(o["prefix"].toString().toLatin1());
+    for (const QJsonValue &v : o["warnings"].toArray())
+        g.warnings << v.toString();
+    return g;
+}
+ */
 } // namespace Tim

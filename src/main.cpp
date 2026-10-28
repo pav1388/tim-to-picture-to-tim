@@ -12,7 +12,7 @@
 #include "logwindow.h"
 
 #ifndef APP_VERSION
-#define APP_VERSION "-dev"
+#define APP_VERSION "er-dev"
 #endif
 
 Q_IMPORT_PLUGIN(QICOPlugin)

@@ -9,7 +9,7 @@
 ## Скриншоты
 
 <p align="center">
-  <img src="docs/screenshot-main.png" alt="Светлая тема" width="250">
+  <img src="docs/screenshot-main.png" alt="Светлая тема" width="400">
 </p>
 
 ## Возможности
@@ -54,7 +54,8 @@
 - warnings парсера
 
 Пиксели не дублируются — источник истины файл изображения (PNG/BMP).
-Файл, прошедший `TIM → .ttptt → TIM`, восстанавливается байт-в-байт.
+Если изображения сохранены в PNG рядом с `.ttptt`, цикл
+`TIM -> PNG + .ttptt -> TIM` восстанавливает файл байт-в-байт.
 
 ### Поиск изображений при открытии `.ttptt`
 
@@ -150,7 +151,7 @@ MinGW 4.9.2 32-bit, CMake ≥ 3.5.
 ### Скрипты (Windows)
 
 ```
-scripts\build.bat         инкрементальная сборка → ttptt.exe
+scripts\build.bat         инкрементальная сборка -> ttptt.exe
 scripts\clean-build.bat   удалить build\ и пересобрать
 scripts\release.bat       собрать releases\tim-to-picture-to-tim-v<ver>\
 ```
