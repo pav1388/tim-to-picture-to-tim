@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "palettes.h"
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -15,7 +16,7 @@ namespace Palettes {
 using PaletteParser = QVector<QColor> (*)(const QByteArray &, bool *ok);
 
 // =====================================================================
-// Общий костяк «прочитать файл + распарсить»
+// Common skeleton: "read file + parse"
 // =====================================================================
 static QVector<QColor> readPaletteFile(const QString &path,
 									   PaletteParser parser, bool *ok)
@@ -140,14 +141,19 @@ static QVector<QColor> parseGpl(const QByteArray &data, bool *ok) {
 static void writeGpl(const QString &path, const QVector<QColor> &pal) {
 	QFile f(path); f.open(QIODevice::WriteOnly | QIODevice::Text);
 	QTextStream s(&f);
-	s << "GIMP Palette\nName: ttptt export\nColumns: 16\n#\n";
+	// "GIMP Palette", "Name:", "Columns:", "#" are format markers — DO NOT translate.
+	s << "GIMP Palette\n";
+	s << "Name: " << QCoreApplication::translate("Palettes", "ttptt export") << "\n";
+	s << "Columns: 16\n#\n";
+	const QString colorLabel = QCoreApplication::translate("Palettes", "Untitled");
 	for (auto &c : pal)
-		s << QString("%1 %2 %3\tUntitled\n")
-			 .arg(c.red(), 3).arg(c.green(), 3).arg(c.blue(), 3);
+		s << QString("%1 %2 %3\t%4\n")
+			 .arg(c.red(), 3).arg(c.green(), 3).arg(c.blue(), 3)
+			 .arg(colorLabel);
 }
 
 // =====================================================================
-// PNG / BMP (палитра как картинка)
+// PNG / BMP (palette as an image)
 // =====================================================================
 static Loaded readImage(const QString &path) {
 	Loaded r;
@@ -186,7 +192,7 @@ Loaded loadAny(const QString &path, QString *error) {
 	Loaded r;
 	if (ext == "png" || ext == "bmp") {
 		r = readImage(path);
-		if (!r.valid && error) *error = "Не удалось прочитать изображение";
+		if (!r.valid && error) *error = QCoreApplication::translate("Palettes", "Failed to read image");
 		return r;
 	}
 
@@ -194,11 +200,11 @@ Loaded loadAny(const QString &path, QString *error) {
 	if	  (ext == "act") parser = parseAct;
 	else if (ext == "pal") parser = parseJascPal;
 	else if (ext == "gpl") parser = parseGpl;
-	else { if (error) *error = "Неподдерживаемый формат: " + ext; return r; }
+	else { if (error) *error = QCoreApplication::translate("Palettes", "Unsupported format: %1").arg(ext); return r; }
 
 	bool ok = false;
 	r.colors = readPaletteFile(path, parser, &ok);
-	if (!ok) { if (error) *error = "Не удалось прочитать палитру"; return r; }
+	if (!ok) { if (error) *error = QCoreApplication::translate("Palettes", "Failed to read palette"); return r; }
 	r.valid = true;
 	return r;
 }
@@ -210,7 +216,7 @@ bool saveAny(const QString &path, const QVector<QColor> &pal,
 	if (ext == "pal") { writeJascPal(path, pal); return true; }
 	if (ext == "gpl") { writeGpl(path, pal); return true; }
 	if (ext == "png" || ext == "bmp") { writePng(path, pal, width, height); return true; }
-	if (error) *error = "Неподдерживаемый формат: " + ext;
+	if (error) *error = QCoreApplication::translate("Palettes", "Unsupported format: %1").arg(ext);
 	return false;
 }
 

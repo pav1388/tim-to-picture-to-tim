@@ -40,6 +40,7 @@ if not exist "%SRC_README%" (
 
 REM --- create release dir ---
 if not exist "%RELEASE_ROOT%" mkdir "%RELEASE_ROOT%"
+if exist "%DEST%" rmdir /S /Q "%DEST%"
 if not exist "%DEST%" mkdir "%DEST%"
 
 REM --- README.md (always overwrite) ---

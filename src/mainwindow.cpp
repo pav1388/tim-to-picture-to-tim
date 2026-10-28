@@ -15,6 +15,7 @@
 #include "timhelpers.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -56,15 +57,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <cstring>
-// #include <QAbstractButton>
-// #include <QHash>
-// #include <QInputDialog>
-// #include <QPlainTextEdit>
-// #include <QRadioButton>
-// #include <QSize>
-// #include <QStyle>
 
-static const QStringList kBppLabels = {"0 (4-bit)", "1 (8-bit)", "2 (16-bit)", "3 (24-bit)"};
 static const int kRecentLimit = 10;
 
 // =====================================================================
@@ -82,7 +75,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 		const QString fallbackDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
 		QDir().mkpath(fallbackDir);
 		iniPath = fallbackDir + "/ttptt-settings.ini";
-		qInfo() << "Настройки перенесены в" << iniPath;
+		qInfo() << "Settings moved to" << iniPath;
 	}
 	m_settings = new QSettings(iniPath, QSettings::IniFormat, this);
 	loadConfig();
@@ -106,8 +99,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 	resize(680, 480);
 	restoreGeometry(m_settings->value("window_geometry").toByteArray());
 	refreshPreview();
-	setStatus(tr("Готово."));
-	qInfo() << "Приложение готово";
+	setStatus(tr("Ready."));
+	qInfo() << "Application ready";
 }
 
 MainWindow::~MainWindow() {
@@ -138,6 +131,8 @@ void MainWindow::loadConfig() {
 	m_lastDir = m_settings->value("last_dir").toString();
 	m_batchImageFormat = m_settings->value("batch_image_format", "png").toString();
 	if (m_batchImageFormat != "bmp" && m_batchImageFormat != "png") m_batchImageFormat = "png";
+	m_language = m_settings->value("language", "en").toString();
+	if (m_language.isEmpty()) m_language = QStringLiteral("en");
 }
 
 void MainWindow::saveConfig() {
@@ -159,6 +154,7 @@ void MainWindow::saveConfig() {
 	m_settings->setValue("last_dir", m_lastDir);
 	m_settings->setValue("recent_files", m_recentFiles);
 	m_settings->setValue("window_geometry", saveGeometry());
+	m_settings->setValue("language", m_language);
 	m_settings->sync();
 }
 
@@ -184,18 +180,18 @@ void MainWindow::updateRecentMenu() {
     m_recentSubmenu->clear();
 
     if (m_recentFiles.isEmpty()) {
-        m_recentSubmenu->addAction(tr("(нет недавних файлов)"))->setEnabled(false);
+        m_recentSubmenu->addAction(tr("(no recent files)"))->setEnabled(false);
         return;
     }
 
     for (int i = 0; i < m_recentFiles.size(); ++i) {
         const QString path = m_recentFiles[i];
         QAction *a = m_recentSubmenu->addAction(
-            QString("%1. %2").arg(i + 1).arg(QFileInfo(path).fileName()));
+            tr("%1. %2").arg(i + 1).arg(QFileInfo(path).fileName()));
 
         connect(a, &QAction::triggered, this, [this, path]() {
             if (!QFileInfo::exists(path)) {
-                showMsgBox(this, QMessageBox::Warning, tr("Файл не найден"), path);
+                showMsgBox(this, QMessageBox::Warning, tr("File not found"), path);
                 m_recentFiles.removeAll(path);
                 updateRecentMenu();
                 return;
@@ -209,130 +205,169 @@ void MainWindow::updateRecentMenu() {
     }
 
     m_recentSubmenu->addSeparator();
-    connect(m_recentSubmenu->addAction(tr("Очистить список")),
+    connect(m_recentSubmenu->addAction(tr("Clear list")),
             &QAction::triggered, this, &MainWindow::clearRecent);
 }
 
 void MainWindow::buildMenus() {
     auto *mb = menuBar();
 
-    // ===== Файл =====
-    m_fileMenu = mb->addMenu(tr("Файл"));
-    m_fileMenu->addAction(tr("Открыть TIM/Метаданные..."), this, &MainWindow::openTim, QKeySequence("Ctrl+O"));
-    m_fileMenu->addAction(tr("Открыть как сырой TIM..."), this, &MainWindow::openRawTim, QKeySequence("Ctrl+Shift+O"));
-    m_fileMenu->addAction(tr("Заменить текущее изображение..."), this, &MainWindow::replaceImage, QKeySequence("Ctrl+R"));
+    // ===== File =====
+    m_fileMenu = mb->addMenu(tr("File"));
+    m_fileMenu->addAction(tr("Open TIM/Metadata..."), this, &MainWindow::openTim, QKeySequence("Ctrl+O"));
+    m_fileMenu->addAction(tr("Open as raw TIM..."), this, &MainWindow::openRawTim, QKeySequence("Ctrl+Shift+O"));
+    m_fileMenu->addAction(tr("Replace current image..."), this, &MainWindow::replaceImage, QKeySequence("Ctrl+R"));
     m_fileMenu->addSeparator();
-    m_fileMenu->addAction(tr("Сохранить TIM"), this, &MainWindow::saveTim, QKeySequence("Ctrl+S"));
-    m_fileMenu->addAction(tr("Сохранить TIM как..."), this, &MainWindow::saveTimAs);
+    m_fileMenu->addAction(tr("Save TIM"), this, &MainWindow::saveTim, QKeySequence("Ctrl+S"));
+    m_fileMenu->addAction(tr("Save TIM As..."), this, &MainWindow::saveTimAs);
     m_fileMenu->addSeparator();
-    m_fileMenu->addAction(tr("Сохранить изображение как..."), this, &MainWindow::saveImage, QKeySequence("Ctrl+Shift+S"));
-    m_fileMenu->addAction(tr("Сохранить все изображения как..."), this, &MainWindow::saveAllImages, QKeySequence("Ctrl+Shift+A"));
-    m_saveTtpttAction = m_fileMenu->addAction(tr("Сохранить метаданные (.ttptt)"), this, &MainWindow::saveTtptt, QKeySequence("Ctrl+Alt+S"));
-    m_saveTtpttAsAction = m_fileMenu->addAction(tr("Сохранить метаданные как..."), this, &MainWindow::saveTtpttAs);
+    m_fileMenu->addAction(tr("Save Image As..."), this, &MainWindow::saveImage, QKeySequence("Ctrl+Shift+S"));
+    m_fileMenu->addAction(tr("Save All Images As..."), this, &MainWindow::saveAllImages, QKeySequence("Ctrl+Shift+A"));
+    m_saveTtpttAction = m_fileMenu->addAction(tr("Save Metadata (.ttptt)"), this, &MainWindow::saveTtptt, QKeySequence("Ctrl+Alt+S"));
+    m_saveTtpttAsAction = m_fileMenu->addAction(tr("Save Metadata As..."), this, &MainWindow::saveTtpttAs);
     m_fileMenu->addSeparator();
-    m_fileMenu->addAction(tr("Закрыть файл"), this, &MainWindow::closeFile, QKeySequence("Ctrl+W"));
+    m_fileMenu->addAction(tr("Close File"), this, &MainWindow::closeFile, QKeySequence("Ctrl+W"));
     m_fileMenu->addSeparator();
-    m_recentSubmenu = m_fileMenu->addMenu(tr("Недавние файлы"));
+    m_recentSubmenu = m_fileMenu->addMenu(tr("Recent Files"));
     updateRecentMenu();
     m_fileMenu->addSeparator();
-    m_fileMenu->addAction(tr("Выход"), this, &QWidget::close);
+    m_fileMenu->addAction(tr("Quit"), this, &QWidget::close);
 
-    // ===== Правка =====
-    auto *em = mb->addMenu(tr("Правка"));
-    em->addAction(tr("Применить метаданные"), this, &MainWindow::applyMetadata, QKeySequence("Ctrl+Return"));
-    em->addAction(tr("Сбросить изменения"), this, &MainWindow::resetMetadata, QKeySequence("Ctrl+Shift+R"));
+    // ===== Edit =====
+    auto *em = mb->addMenu(tr("Edit"));
+    em->addAction(tr("Apply Metadata"), this, &MainWindow::applyMetadata, QKeySequence("Ctrl+Return"));
+    em->addAction(tr("Reset Changes"), this, &MainWindow::resetMetadata, QKeySequence("Ctrl+Shift+R"));
     em->addSeparator();
-    em->addAction(tr("Конвертировать 24bpp -> 16bpp"), this, &MainWindow::convertTo16bpp);
-    em->addAction(tr("Конвертировать 16bpp -> 24bpp"), this, &MainWindow::convertTo24bpp);
+    em->addAction(tr("Convert 24bpp -> 16bpp"), this, &MainWindow::convertTo16bpp);
+    em->addAction(tr("Convert 16bpp -> 24bpp"), this, &MainWindow::convertTo24bpp);
     em->addSeparator();
-    em->addAction(tr("Разделить изображение на два"), this, &MainWindow::splitImage);
-    em->addAction(tr("Слить со следующим"), this, &MainWindow::mergeWithNext);
-    em->addAction(tr("Слить с предыдущим"), this, &MainWindow::mergeWithPrev);
+    em->addAction(tr("Split Image in Two"), this, &MainWindow::splitImage);
+    em->addAction(tr("Merge with Next"), this, &MainWindow::mergeWithNext);
+    em->addAction(tr("Merge with Previous"), this, &MainWindow::mergeWithPrev);
 
-    // ===== Палитра =====
-    auto *pm = mb->addMenu(tr("Палитра"));
-    pm->addAction(tr("Экспорт палитры..."), this, &MainWindow::exportPalette);
-    pm->addAction(tr("Импорт палитры..."), this, &MainWindow::importPalette);
+    // ===== Palette =====
+    auto *pm = mb->addMenu(tr("Palette"));
+    pm->addAction(tr("Export Palette..."), this, &MainWindow::exportPalette);
+    pm->addAction(tr("Import Palette..."), this, &MainWindow::importPalette);
     pm->addSeparator();
 
-    m_autoActAction = pm->addAction(tr("Сохранять Adobe Color Table (.act) рядом с изображением"));
+    m_autoActAction = pm->addAction(tr("Save Adobe Color Table (.act) next to image"));
     m_autoActAction->setCheckable(true);
     m_autoActAction->setChecked(m_autoSaveAct);
     connect(m_autoActAction, &QAction::toggled, this, [this](bool v) { m_autoSaveAct = v; });
 
-    m_autoPalAction = pm->addAction(tr("Сохранять JASC Palette (.pal) рядом с изображением"));
+    m_autoPalAction = pm->addAction(tr("Save JASC Palette (.pal) next to image"));
     m_autoPalAction->setCheckable(true);
     m_autoPalAction->setChecked(m_autoSavePal);
     connect(m_autoPalAction, &QAction::toggled, this, [this](bool v) { m_autoSavePal = v; });
 
-    m_autoGplAction = pm->addAction(tr("Сохранять GIMP Palette (.gpl) рядом с изображением"));
+    m_autoGplAction = pm->addAction(tr("Save GIMP Palette (.gpl) next to image"));
     m_autoGplAction->setCheckable(true);
     m_autoGplAction->setChecked(m_autoSaveGpl);
     connect(m_autoGplAction, &QAction::toggled, this, [this](bool v) { m_autoSaveGpl = v; });
 
-    // ===== Пакетная обработка =====
-    auto *bm = mb->addMenu(tr("Пакетная обработка"));
-    bm->addAction(tr("Пакетное извлечение изображений из TIM"), this, &MainWindow::batchExtract);
-    bm->addAction(tr("Пакетная замена изображений в TIM"), this, &MainWindow::batchReplace);
+    // ===== Batch =====
+    auto *bm = mb->addMenu(tr("Batch Processing"));
+    bm->addAction(tr("Batch Extract Images from TIM"), this, &MainWindow::batchExtract);
+    bm->addAction(tr("Batch Replace Images in TIM"), this, &MainWindow::batchReplace);
 
-    // ===== Вид =====
-    auto *vm = mb->addMenu(tr("Вид"));
-    m_stpAction = vm->addAction(tr("Прозрачность (STP)"), this, &MainWindow::toggleStp);
+    // ===== View =====
+    auto *vm = mb->addMenu(tr("View"));
+    m_stpAction = vm->addAction(tr("Transparency (STP)"), this, &MainWindow::toggleStp);
     m_stpAction->setCheckable(true);
     m_stpAction->setChecked(m_showStp);
     vm->addSeparator();
-    vm->addAction(tr("Предыдущее изображение"), this, &MainWindow::prevImage, QKeySequence("Ctrl+Left"));
-    vm->addAction(tr("Следующее изображение"), this, &MainWindow::nextImage, QKeySequence("Ctrl+Right"));
-    vm->addAction(tr("Предыдущая палитра"), this, &MainWindow::prevPaletteRow, QKeySequence("Ctrl+Down"));
-    vm->addAction(tr("Следующая палитра"), this, &MainWindow::nextPaletteRow, QKeySequence("Ctrl+Up"));
+    vm->addAction(tr("Previous Image"), this, &MainWindow::prevImage, QKeySequence("Ctrl+Left"));
+    vm->addAction(tr("Next Image"), this, &MainWindow::nextImage, QKeySequence("Ctrl+Right"));
+    vm->addAction(tr("Previous Palette"), this, &MainWindow::prevPaletteRow, QKeySequence("Ctrl+Down"));
+    vm->addAction(tr("Next Palette"), this, &MainWindow::nextPaletteRow, QKeySequence("Ctrl+Up"));
     vm->addSeparator();
-    vm->addAction(tr("Масштаб 1:1"), this, &MainWindow::previewScale1to1, QKeySequence("Ctrl+1"));
-    vm->addAction(tr("Вписать в окно"), this, &MainWindow::previewScaleFit, QKeySequence("Ctrl+2"));
+    vm->addAction(tr("Scale 1:1"), this, &MainWindow::previewScale1to1, QKeySequence("Ctrl+1"));
+    vm->addAction(tr("Fit to Window"), this, &MainWindow::previewScaleFit, QKeySequence("Ctrl+2"));
     vm->addSeparator();
-    m_themeLightAction = vm->addAction(tr("Светлая тема"), this, &MainWindow::setThemeLight);
+    m_themeLightAction = vm->addAction(tr("Light Theme"), this, &MainWindow::setThemeLight);
     m_themeLightAction->setCheckable(true);
     m_themeLightAction->setChecked(!m_darkTheme);
-    m_themeDarkAction = vm->addAction(tr("Тёмная тема"), this, &MainWindow::setThemeDark);
+    m_themeDarkAction = vm->addAction(tr("Dark Theme"), this, &MainWindow::setThemeDark);
     m_themeDarkAction->setCheckable(true);
     m_themeDarkAction->setChecked(m_darkTheme);
 
-    // ===== Настройки =====
-    auto *sm = mb->addMenu(tr("Настройки"));
-    m_logAction = sm->addAction(tr("Журнал логов"), this, &MainWindow::toggleLogWindow);
+    // ===== Settings =====
+    auto *sm = mb->addMenu(tr("Settings"));
+    m_logAction = sm->addAction(tr("Log Window"), this, &MainWindow::toggleLogWindow);
     m_logAction->setCheckable(true);
-    m_logAction->setChecked(m_logWindow && m_logWindow->isVisible());	
+    m_logAction->setChecked(m_logWindow && m_logWindow->isVisible());
+
+    auto *langMenu = sm->addMenu(tr("Language"));
+    auto *langGroup = new QActionGroup(this);
+    langGroup->setExclusive(true);
+
+    QAction *langEn = langMenu->addAction(tr("English"));
+    langEn->setCheckable(true);
+    langEn->setData(QStringLiteral("en"));
+    langGroup->addAction(langEn);
+
+    QAction *langRu = langMenu->addAction(tr("Russian"));
+    langRu->setCheckable(true);
+    langRu->setData(QStringLiteral("ru"));
+    langGroup->addAction(langRu);
+
+    if (m_language == QLatin1String("ru"))
+        langRu->setChecked(true);
+    else
+        langEn->setChecked(true);
+
+    connect(langGroup, &QActionGroup::triggered, this, &MainWindow::onLanguageChanged);
+
     sm->addSeparator();
-	sm->addAction(tr("Ассоциация .tim с программой"), this, [this]() {
+	sm->addAction(tr("Associate .tim with this program"), this, [this]() {
 		if (blockedByBatch()) return;
 		FileAssoc::registerFileAssociation(".tim", this);
 	});
-	sm->addAction(tr("Ассоциация .ttptt с программой"), this, [this]() {
+	sm->addAction(tr("Associate .ttptt with this program"), this, [this]() {
 		if (blockedByBatch()) return;
 		FileAssoc::registerFileAssociation(".ttptt", this);
 	});
-	sm->addAction(tr("Снять ассоциацию .tim"), this, [this]() {
+	sm->addAction(tr("Remove .tim association"), this, [this]() {
 		if (blockedByBatch()) return;
 		FileAssoc::unregisterFileAssociation(".tim", this);
 	});
-	sm->addAction(tr("Снять ассоциацию .ttptt"), this, [this]() {
+	sm->addAction(tr("Remove .ttptt association"), this, [this]() {
 		if (blockedByBatch()) return;
 		FileAssoc::unregisterFileAssociation(".ttptt", this);
 	});
     sm->addSeparator();
 
-	m_autoSaveTtpttAction = sm->addAction(tr("Сохранять метаданные .ttptt рядом с изображением"));
+	m_autoSaveTtpttAction = sm->addAction(tr("Save .ttptt metadata next to image"));
     m_autoSaveTtpttAction->setCheckable(true);
     m_autoSaveTtpttAction->setChecked(m_autoSaveTtptt);
     connect(m_autoSaveTtpttAction, &QAction::toggled, this, [this](bool v) { m_autoSaveTtptt = v; });
 
-    m_manualAllPalettesAction = sm->addAction(tr("Сохранять все изображения в каждой палитре"));
+    m_manualAllPalettesAction = sm->addAction(tr("Save all images in each palette"));
     m_manualAllPalettesAction->setCheckable(true);
     m_manualAllPalettesAction->setChecked(m_saveAllPalettesAuto);
     connect(m_manualAllPalettesAction, &QAction::toggled, this, [this](bool v) { m_saveAllPalettesAuto = v; });
 
-    // ===== Справка =====
-    auto *hm = mb->addMenu(tr("Справка"));
-    hm->addAction(tr("О программе..."), this, &MainWindow::showAbout);
+    // ===== Help =====
+    auto *hm = mb->addMenu(tr("Help"));
+    hm->addAction(tr("About..."), this, &MainWindow::showAbout);
+}
+
+void MainWindow::onLanguageChanged(QAction *action) {
+    if (!action) return;
+    const QString lang = action->data().toString();
+    if (lang.isEmpty() || lang == m_language) return;
+
+    m_language = lang;
+    if (m_settings) {
+        m_settings->setValue("language", m_language);
+        m_settings->sync();
+    }
+
+    QMessageBox::information(
+        this,
+        tr("Restart Required"),
+        tr("The new language will be applied after restarting the application."));
 }
 
 void MainWindow::showAbout() { ::showAboutDialog(this); }
@@ -342,9 +377,9 @@ void MainWindow::buildUi() {
 	auto *main = new QHBoxLayout(central);
 	auto *left = new QVBoxLayout(); main->addLayout(left, 1);
 	
-	// --- Палитра ---
+	// --- Palette ---
 	auto *palHead = new QHBoxLayout();
-	auto *palLabel = new QLabel(tr("Палитра:"));
+	auto *palLabel = new QLabel(tr("Palette:"));
 	palLabel->setFixedWidth(110);
 	palLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 	palHead->addWidget(palLabel, 0);
@@ -376,9 +411,9 @@ void MainWindow::buildUi() {
 	m_paletteLabel->installEventFilter(this);
 	left->addWidget(m_paletteLabel);
 
-	// --- Изображение ---
+	// --- Image ---
 	auto *prevHead = new QHBoxLayout();
-	auto *prevLabel = new QLabel(tr("Изображение:"));
+	auto *prevLabel = new QLabel(tr("Image:"));
 	prevLabel->setFixedWidth(110);
 	prevLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 	prevHead->addWidget(prevLabel, 0);
@@ -425,11 +460,11 @@ void MainWindow::buildUi() {
 	m_previewLabel->installEventFilter(this);
 	left->addWidget(m_previewLabel, 1);
 
-	// --- Правая панель (Параметры) ---
+	// --- Right panel (Parameters) ---
 	auto *right = new QWidget(); right->setMaximumWidth(380); main->addWidget(right);
 	buildParamsPanel(right);
 
-	m_statusLabel = new QLabel(tr("Готово.")); statusBar()->addWidget(m_statusLabel, 1);
+	m_statusLabel = new QLabel(tr("Ready.")); statusBar()->addWidget(m_statusLabel, 1);
 }
 
 void MainWindow::buildParamsPanel(QWidget *parent) {
@@ -439,25 +474,28 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	grid->setSpacing(4);
 	grid->setContentsMargins(2, 2, 2, 2);
 
-	// --- Заголовок TIM (Колонка 0, Ряд 1) ---
-	auto *f1 = new QGroupBox(tr("Заголовок"), parent); 
+	// --- TIM header (Column 0, Row 1) ---
+	auto *f1 = new QGroupBox(tr("Header"), parent); 
 	auto *l1 = new QFormLayout(f1);
 	l1->setVerticalSpacing(2);
 	l1->setContentsMargins(4, 6, 4, 6);
 
 	m_bppCombo = new QComboBox(); 
-	for (auto &s : kBppLabels) m_bppCombo->addItem(s); 
+	m_bppCombo->addItem(tr("0 (4-bit)"));
+	m_bppCombo->addItem(tr("1 (8-bit)"));
+	m_bppCombo->addItem(tr("2 (16-bit)"));
+	m_bppCombo->addItem(tr("3 (24-bit)"));
 	m_bppCombo->setMinimumWidth(80);
-	l1->addRow("bpp:", m_bppCombo);
+	l1->addRow(tr("bpp:"), m_bppCombo);
 
-	m_hasClutCheck = new QCheckBox("has_clut"); 
-	m_hasImageCheck = new QCheckBox("has_image");
+	m_hasClutCheck = new QCheckBox(tr("has_clut")); 
+	m_hasImageCheck = new QCheckBox(tr("has_image"));
 	l1->addRow(m_hasClutCheck); 
 	l1->addRow(m_hasImageCheck);
 
 	m_flagsDisplay = new QLabel("0x00"); 
 	m_flagsDisplay->setStyleSheet("color: #888;");
-	l1->addRow("flags:", m_flagsDisplay);
+	l1->addRow(tr("flags:"), m_flagsDisplay);
 	grid->addWidget(f1, 1, 0);
 
 	connect(m_bppCombo, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &MainWindow::updateFlagsDisplay);
@@ -465,7 +503,7 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	connect(m_hasClutCheck, &QCheckBox::toggled, this, &MainWindow::updateFlagsDisplay);
 	connect(m_hasImageCheck, &QCheckBox::toggled, this, &MainWindow::updateFlagsDisplay);
 
-	// --- CLUT (Колонка 0, Ряд 2) ---
+	// --- CLUT (Column 0, Row 2) ---
 	auto *f2 = new QGroupBox(tr("CLUT"), parent); 
 	auto *l2 = new QFormLayout(f2);
 	l2->setVerticalSpacing(2);
@@ -477,11 +515,11 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	m_clutWidthEdit = new QLineEdit(); m_clutWidthEdit->setMinimumWidth(80);
 	m_clutHeightEdit = new QLineEdit(); m_clutHeightEdit->setMinimumWidth(80);
 
-	l2->addRow("size:", m_clutSizeEdit); 
-	l2->addRow("x:", m_clutXEdit); 
-	l2->addRow("y:", m_clutYEdit);
-	l2->addRow("width_words:", m_clutWidthEdit); 
-	l2->addRow("height:", m_clutHeightEdit);
+	l2->addRow(tr("size:"), m_clutSizeEdit); 
+	l2->addRow(tr("x:"), m_clutXEdit); 
+	l2->addRow(tr("y:"), m_clutYEdit);
+	l2->addRow(tr("width_words:"), m_clutWidthEdit); 
+	l2->addRow(tr("height:"), m_clutHeightEdit);
 
 	QLabel *hint2 = new QLabel(tr("(size = 12+w_w*2*h)")); 
 	hint2->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -492,8 +530,8 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	connect(m_clutWidthEdit, &QLineEdit::textChanged, this, &MainWindow::onClutDimsChanged);
 	connect(m_clutHeightEdit, &QLineEdit::textChanged, this, &MainWindow::onClutDimsChanged);
 
-	// --- Изображение (Колонка 1, Ряды 1-2) ---
-	auto *f3 = new QGroupBox(tr("Изображение"), parent); 
+	// --- Image (Column 1, Rows 1-2) ---
+	auto *f3 = new QGroupBox(tr("Image"), parent); 
 	auto *l3 = new QFormLayout(f3);
 	l3->setVerticalSpacing(2);
 	l3->setContentsMargins(4, 6, 4, 6);
@@ -504,11 +542,11 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	m_imgWidthEdit = new QLineEdit(); m_imgWidthEdit->setMinimumWidth(80);
 	m_imgHeightEdit = new QLineEdit(); m_imgHeightEdit->setMinimumWidth(80);
 
-	l3->addRow("size:", m_imgSizeEdit); 
-	l3->addRow("x:", m_imgXEdit); 
-	l3->addRow("y:", m_imgYEdit);
-	l3->addRow("width_words:", m_imgWidthEdit); 
-	l3->addRow("height:", m_imgHeightEdit);
+	l3->addRow(tr("size:"), m_imgSizeEdit); 
+	l3->addRow(tr("x:"), m_imgXEdit); 
+	l3->addRow(tr("y:"), m_imgYEdit);
+	l3->addRow(tr("width_words:"), m_imgWidthEdit); 
+	l3->addRow(tr("height:"), m_imgHeightEdit);
 
 	QLabel *hint1 = new QLabel(tr("(size = 12+w_w*2*h)")); 
 	hint1->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -524,9 +562,9 @@ void MainWindow::buildParamsPanel(QWidget *parent) {
 	connect(m_imgWidthEdit, &QLineEdit::textChanged, this, &MainWindow::onImageDimsChanged);
 	connect(m_imgHeightEdit, &QLineEdit::textChanged, this, &MainWindow::onImageDimsChanged);
 
-	// --- Кнопки (Ряд 3) ---
-	auto *bReset = new QPushButton(tr("Сбросить изменения")); 
-	auto *bApply = new QPushButton(tr("Применить метаданные"));
+	// --- Buttons (Row 3) ---
+	auto *bReset = new QPushButton(tr("Reset Changes")); 
+	auto *bApply = new QPushButton(tr("Apply Metadata"));
 	bReset->setMinimumHeight(36);
 	bApply->setMinimumHeight(36);
 
@@ -551,22 +589,22 @@ bool MainWindow::loadTimFromPath(const QString &path, bool silent) {
 		return loadTtpttFromPath(path, silent);
 
 	if (m_batchRunning) {
-		if (!silent) showMsgBox(this, QMessageBox::Information, tr("Инфо"), tr("Идет пакетная операция."));
+		if (!silent) showMsgBox(this, QMessageBox::Information, tr("Info"), tr("A batch operation is in progress."));
 		return false;
 	}
 	if (!silent && !confirmDiscard()) return false;
-	qInfo() << "Открытие TIM:" << path;
+	qInfo() << "Opening TIM:" << path;
 	QFile f(path);
 	if (!f.open(QIODevice::ReadOnly)) {
-		qWarning() << "Не удалось открыть:" << path;
-		if (!silent) showMsgBox(this, QMessageBox::Critical, "Ошибка", "Не могу открыть файл");
+		qWarning() << "Failed to open:" << path;
+		if (!silent) showMsgBox(this, QMessageBox::Critical, tr("Error"), tr("Cannot open file"));
 		return false;
 	}
 	QByteArray data = f.readAll(); f.close();
 	QVector<Tim::Group> groups = Tim::parseAll(data);
 	if (groups.isEmpty()) {
-		qWarning() << "Не TIM:" << path;
-		if (!silent) showMsgBox(this, QMessageBox::Critical, "Ошибка", "Не TIM");
+		qWarning() << "Not a TIM file:" << path;
+		if (!silent) showMsgBox(this, QMessageBox::Critical, tr("Error"), tr("Not a TIM file"));
 		return false;
 	}
 	m_groups = groups;
@@ -586,12 +624,12 @@ bool MainWindow::loadTimFromPath(const QString &path, bool silent) {
 	rememberDir(path);
 	refreshAll();
 	updateTitle();
-	setStatus(tr("Открыто: %1 | групп: %2 | изобр.: %3")
+	setStatus(tr("Opened: %1 | groups: %2 | images: %3")
 		.arg(QFileInfo(path).fileName()).arg(m_groups.size()).arg(m_entries.size()));
 	if (!m_groups.isEmpty() && !m_groups.first().prefix.isEmpty())
-		qInfo() << QString("Префикс перед первым TIM сохранён: %1 байт")
+		qInfo() << QString("Prefix before first TIM preserved: %1 bytes")
 					   .arg(m_groups.first().prefix.size());
-	qInfo() << QString("Открыто: %1 (групп: %2, изобр.: %3, размер: %4 байт)")
+	qInfo() << QString("Opened: %1 (groups: %2, images: %3, size: %4 bytes)")
 		.arg(QFileInfo(path).fileName()).arg(m_groups.size()).arg(m_entries.size()).arg(data.size());
 	for (const auto &g : m_groups)
 		for (const auto &w : g.warnings) qWarning() << "TIM:" << w;
@@ -602,15 +640,15 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 	if (m_batchRunning) return false;
 	if (!skipConfirm && !silent && !confirmDiscard()) return false;
 
-	qInfo() << "Открытие как сырой TIM:" << QFileInfo(path).fileName();
+	qInfo() << "Opening as raw TIM:" << QFileInfo(path).fileName();
 	QFile f(path);
 	if (!f.open(QIODevice::ReadOnly)) return false;
 	QByteArray data = f.readAll();
 	f.close();
 
 	if (data.startsWith(QByteArray("TIM2", 4))) {
-		showMsgBox(this, QMessageBox::Information, tr("TIM2"),
-				   tr("Это TIM2 (PlayStation 2), а не PS1 TIM. Формат не поддерживается."));
+		showMsgBox(this, QMessageBox::Information, "TIM2",
+				   tr("This is TIM2 (PlayStation 2), not a PS1 TIM. The format is not supported."));
 		return false;
 	}
 
@@ -623,12 +661,12 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 
 	QVector<Tim::Group> groups;
 	if (hasData) {
-		group.warnings << "Сырой TIM";
+		group.warnings << tr("Raw TIM");
 		groups << group;
 
 	} else {
 		if (silent) return false;
-		if (showMsgBox(this, QMessageBox::Question, "Не распознан", "Открыть как пустой?",
+		if (showMsgBox(this, QMessageBox::Question, tr("Not Recognized"), tr("Open as empty?"),
 					   QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes)
 			return false;
 
@@ -680,8 +718,8 @@ bool MainWindow::loadRawTimFromPath(const QString &path, bool silent, bool skipC
 
 void MainWindow::openTim() {
 	if (blockedByBatch()) return;
-	QString p = QFileDialog::getOpenFileName(this, "TIM / Метаданные", initialDir(),
-		"TIM и метаданные (*.tim *.ttptt);;TIM (*.tim);;Метаданные ttptt (*.ttptt);;All (*.*)");
+	QString p = QFileDialog::getOpenFileName(this, tr("TIM / Metadata"), initialDir(),
+		tr("TIM and metadata (*.tim *.ttptt);;TIM (*.tim);;ttptt metadata (*.ttptt);;All files (*.*)"));
 	if (p.isEmpty()) return;
 	if (QFileInfo(p).suffix().toLower() == "ttptt")
 		loadTtpttFromPath(p);
@@ -691,7 +729,7 @@ void MainWindow::openTim() {
 
 void MainWindow::openRawTim() { 
 	if (blockedByBatch()) return; 
-	QString p = QFileDialog::getOpenFileName(this, "Raw", initialDir(), "All (*.*)"); 
+	QString p = QFileDialog::getOpenFileName(this, tr("Raw"), initialDir(), tr("All files (*.*)")); 
 	if (!p.isEmpty()) loadRawTimFromPath(p); 
 }
 
@@ -702,26 +740,26 @@ void MainWindow::clearRecent() {
 
 bool MainWindow::confirmDiscard() {
 	if (m_batchRunning) {
-		showMsgBox(this, QMessageBox::Information, "Инфо", "Идет операция.");
+		showMsgBox(this, QMessageBox::Information, tr("Info"), tr("Operation in progress."));
 		return false;
 	}
 	if (!m_dirty) return true;
 
-	auto r = showMsgBox(this, QMessageBox::Question, "Изменения", "Сохранить?",
+	auto r = showMsgBox(this, QMessageBox::Question, tr("Changes"), tr("Save?"),
 						QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
 						QMessageBox::Save);
 	if (r == QMessageBox::Cancel) {
-		qInfo() << "Действие отменено пользователем (несохранённые изменения)";
+		qInfo() << "Action canceled by user (unsaved changes)";
 		return false;
 	}
 	if (r == QMessageBox::Save) {
 		if (!m_sourcePath.isEmpty()) {
 			saveTim();
 		} else if (!m_ttpttPath.isEmpty()) {
-			auto choice = showMsgBox(this, QMessageBox::Question, "Куда сохранять",
-				"Нет исходного .tim.\n"
-				"«Да» — перезаписать изображение рядом + метаданные\n"
-				"«Нет» — сохранить как новый .tim",
+			auto choice = showMsgBox(this, QMessageBox::Question, tr("Where to Save"),
+				tr("No source .tim file.\n"
+				   "\"Yes\" — overwrite the image next to it + metadata\n"
+				   "\"No\" — save as a new .tim"),
 				QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
 				QMessageBox::Yes);
 			if (choice == QMessageBox::Cancel) return false;
@@ -743,16 +781,16 @@ bool MainWindow::writeTimToPath(const QString &path) {
 	QByteArray data = Tim::rebuildAll(m_groups);
 	QFile f(path);
 	if (!f.open(QIODevice::WriteOnly)) {
-		showMsgBox(this, QMessageBox::Critical, "Ошибка",
-				   "Не могу открыть на запись:\n" + path);
+		showMsgBox(this, QMessageBox::Critical, tr("Error"),
+				   tr("Cannot open for writing:\n") + path);
 		return false;
 	}
 	f.write(data);
 	f.close();
 	m_dirty = false;
 	updateTitle();
-	setStatus("Сохранено: " + path);
-	qInfo() << QString("Сохранено: %1 (%2 байт)").arg(path).arg(data.size());
+	setStatus(tr("Saved: ") + path);
+	qInfo() << QString("Saved: %1 (%2 bytes)").arg(path).arg(data.size());
 	return true;
 }
 
@@ -770,10 +808,9 @@ void MainWindow::saveTim() {
 void MainWindow::saveTimAs() {
     if (m_batchRunning || m_groups.isEmpty()) return;
     QString def = m_sourceStem.isEmpty() ? "untitled" : m_sourceStem + "_out";
-    QString path = QFileDialog::getSaveFileName(this, "Save TIM",
-                                                defaultSavePath(def), "TIM (*.tim)");
+    QString path = QFileDialog::getSaveFileName(this, tr("Save TIM"),
+                                                defaultSavePath(def), tr("TIM (*.tim)"));
     if (path.isEmpty()) return;
-    // if (QFileInfo(path).suffix().isEmpty()) path += ".tim";
     if (!writeTimToPath(path)) return;
 
     m_sourcePath = path;
@@ -826,7 +863,7 @@ void MainWindow::saveImage() {
     QString selectedFilter;
     QString chosenPath = QFileDialog::getSaveFileName(
         this,
-        tr("Сохранить изображение"),
+        tr("Save Image"),
         defaultSavePath(def),
         tr("PNG (*.png);;BMP (*.bmp)"),
         &selectedFilter);
@@ -851,10 +888,10 @@ void MainWindow::saveImage() {
 
     if (ext == ".bmp" && g->bpp == 2 &&
         imageHasStpPixels(g->images[ii], g->bpp)) {
-        if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
-            tr("В изображении 16bpp есть STP-пиксели (полупрозрачность).\n"
-               "При сохранении в BMP STP-биты будут сброшены.\n"
-			   "Используйте PNG.\n\nПродолжить?"),
+        if (showMsgBox(this, QMessageBox::Warning, tr("BMP and STP"),
+            tr("The 16bpp image contains STP pixels (semi-transparency).\n"
+               "Saving to BMP will reset the STP bits.\n"
+			   "Use PNG instead.\n\nContinue?"),
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::No) != QMessageBox::Yes)
             return;
@@ -864,14 +901,14 @@ void MainWindow::saveImage() {
     if (multiPal) {
         saved = saveAllPalettesForImage(*g, ii, chosenDir, chosenBase, ext);
         if (saved == 0) {
-            showMsgBox(this, QMessageBox::Critical, tr("Ошибка"),
-                       tr("Не удалось сохранить изображения:\n") + chosenDir);
+            showMsgBox(this, QMessageBox::Critical, tr("Error"),
+                       tr("Failed to save images:\n") + chosenDir);
             return;
         }
     } else {
         if (!img.save(chosenPath)) {
-            showMsgBox(this, QMessageBox::Critical, tr("Ошибка"),
-                       tr("Не удалось сохранить:\n") + chosenPath);
+            showMsgBox(this, QMessageBox::Critical, tr("Error"),
+                       tr("Failed to save:\n") + chosenPath);
             return;
         }
         saved = 1;
@@ -887,17 +924,17 @@ void MainWindow::saveImage() {
 		if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
 						   m_currentEntry, m_showStp)) {
 			m_ttpttPath = ttpttPath;
-			qInfo() << "Метаданные сохранены рядом с изображением:" << ttpttPath;
+			qInfo() << "Metadata saved next to image:" << ttpttPath;
 		}
 	}
 
     const QString what = multiPal
-        ? QString("%1 файлов (%2_pal01..%2_pal%3%4)")
+        ? tr("%1 file(s) (%2_pal01..%2_pal%3%4)")
               .arg(saved).arg(chosenBase)
               .arg(g->clutHeader.height, 2, 10, QChar('0')).arg(ext)
         : chosenPath;
-    setStatus("Сохранено: " + what);
-    qInfo() << "Сохранено:" << what;
+    setStatus(tr("Saved: ") + what);
+    qInfo() << "Saved:" << what;
 }
 
 void MainWindow::saveAllImages() {
@@ -923,7 +960,7 @@ void MainWindow::saveAllImages() {
     QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(
         this,
-        tr("Сохранить все изображения как..."),
+        tr("Save All Images As..."),
         defPath,
         tr("PNG (*.png);;BMP (*.bmp)"),
         &selectedFilter);
@@ -943,10 +980,10 @@ void MainWindow::saveAllImages() {
         for (const auto &g : m_groups)
             if (groupHasAnyStp(g)) ++stpGroups;
         if (stpGroups > 0) {
-            if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
-                tr("В %1 группе(ах) есть 16bpp-изображения со STP-пикселями.\n"
-                   "BMP не хранит альфа-канал — при обратном TIM->BMP->TIM\n"
-                   "STP-биты будут сброшены. Используйте PNG.\n\nПродолжить?").arg(stpGroups),
+            if (showMsgBox(this, QMessageBox::Warning, tr("BMP and STP"),
+                tr("%1 group(s) contain 16bpp images with STP pixels.\n"
+                   "BMP has no alpha channel — a TIM->BMP->TIM round-trip\n"
+                   "will reset the STP bits. Use PNG instead.\n\nContinue?").arg(stpGroups),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                 return;
         }
@@ -963,8 +1000,8 @@ void MainWindow::saveAllImages() {
             items.append({ &m_groups[gi], ii, n });
         }
     if (items.isEmpty()) {
-        showMsgBox(this, QMessageBox::Information, tr("Инфо"),
-                   tr("В текущем TIM нет изображений."));
+        showMsgBox(this, QMessageBox::Information, tr("Info"),
+                   tr("The current TIM contains no images."));
         return;
     }
 
@@ -1016,16 +1053,16 @@ void MainWindow::saveAllImages() {
         QString ttpttPath = dir.filePath(stem + ".ttptt");
         if (writeTtpttFile(ttpttPath, m_groups, m_sourcePath, m_paletteRow,
                            m_currentEntry, m_showStp))
-            qInfo() << "Метаданные сохранены рядом с изображениями:" << ttpttPath;
+            qInfo() << "Metadata saved next to images:" << ttpttPath;
         else
-            qWarning() << "Не удалось сохранить метаданные:" << ttpttPath;
+            qWarning() << "Failed to save metadata:" << ttpttPath;
     }
 
-    QString msg = QString("Сохранено %1 файлов (%2) в %3")
+    QString msg = tr("Saved %1 file(s) (%2) to %3")
         .arg(saved).arg(ext).arg(dirPath);
     if (!errors.isEmpty())
-        msg += "\n\nОшибки:\n" + errors.mid(0, 10).join("\n");
-    showMsgBox(this, QMessageBox::Information, tr("Готово"), msg);
+        msg += tr("\n\nErrors:\n") + errors.mid(0, 10).join("\n");
+    showMsgBox(this, QMessageBox::Information, tr("Done"), msg);
     setStatus(msg.split('\n').first());
     qInfo() << msg;
 	m_dirty = false; 
@@ -1035,15 +1072,15 @@ void MainWindow::saveAllImages() {
 bool MainWindow::writeTtpttToPath(const QString &path) {
 	if (!writeTtpttFile(path, m_groups, m_sourcePath, m_paletteRow,
 						m_currentEntry, m_showStp)) {
-		showMsgBox(this, QMessageBox::Critical, "Ошибка",
-				   "Не удалось сохранить метаданные:\n" + path);
+		showMsgBox(this, QMessageBox::Critical, tr("Error"),
+				   tr("Failed to save metadata:\n") + path);
 		return false;
 	}
 	m_ttpttPath = path;
 	rememberDir(path);
 	updateTitle();
-	setStatus("Метаданные сохранены: " + path);
-	qInfo() << "Метаданные сохранены:" << path;
+	setStatus(tr("Metadata saved: ") + path);
+	qInfo() << "Metadata saved:" << path;
 	return true;
 }
 
@@ -1064,9 +1101,9 @@ void MainWindow::saveTtptt() {
 void MainWindow::saveTtpttAs() {
     if (m_batchRunning || m_groups.isEmpty()) return;
     QString def = (m_sourceStem.isEmpty() ? "untitled" : m_sourceStem) + ".ttptt";
-    QString path = QFileDialog::getSaveFileName(this, "Сохранить метаданные ttptt",
+    QString path = QFileDialog::getSaveFileName(this, tr("Save ttptt metadata"),
                                                 defaultSavePath(def),
-                                                "Метаданные ttptt (*.ttptt)");
+                                                tr("ttptt metadata (*.ttptt)"));
     if (path.isEmpty()) return;
     if (QFileInfo(path).suffix().isEmpty()) path += ".ttptt";
     writeTtpttToPath(path);
@@ -1075,15 +1112,15 @@ void MainWindow::saveTtpttAs() {
 bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	if (m_batchRunning) {
 		if (!silent)
-			showMsgBox(this, QMessageBox::Information, tr("Инфо"), tr("Идет пакетная операция."));
+			showMsgBox(this, QMessageBox::Information, tr("Info"), tr("A batch operation is in progress."));
 		return false;
 	}
 	if (!silent && !confirmDiscard()) return false;
 
-	qInfo() << "Открытие метаданных .ttptt:" << path;
+	qInfo() << "Opening .ttptt metadata:" << path;
 	QFile f(path);
 	if (!f.open(QIODevice::ReadOnly)) {
-		if (!silent) showMsgBox(this, QMessageBox::Critical, "Ошибка", "Не могу открыть файл");
+		if (!silent) showMsgBox(this, QMessageBox::Critical, tr("Error"), tr("Cannot open file"));
 		return false;
 	}
 	QByteArray raw = f.readAll();
@@ -1092,25 +1129,25 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	QJsonParseError perr;
 	QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
 	if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
-		qWarning() << "Ошибка разбора .ttptt:" << perr.errorString();
+		qWarning() << "Error parsing .ttptt:" << perr.errorString();
 		if (!silent)
-			showMsgBox(this, QMessageBox::Critical, "Ошибка",
-					   "Файл не является метаданными ttptt или повреждён:\n" + perr.errorString());
+			showMsgBox(this, QMessageBox::Critical, tr("Error"),
+					   tr("The file is not ttptt metadata or is corrupted:\n") + perr.errorString());
 		return false;
 	}
 	QJsonObject root = doc.object();
 	if (!root.contains("groups") || !root["groups"].isArray()) {
 		if (!silent)
-			showMsgBox(this, QMessageBox::Critical, "Ошибка", "В файле нет данных групп");
+			showMsgBox(this, QMessageBox::Critical, tr("Error"), tr("The file contains no group data"));
 		return false;
 	}
 	
 	int version = root["version"].toInt();
 	if (version < 1 || version > TTPTT_PROJECT_VERSION) {
-		qWarning() << "Парсер .ttptt: неизвестная версия метаданных - " << version;
+		qWarning() << "ttptt parser: unknown metadata version -" << version;
 	}
 	if (version < TTPTT_PROJECT_VERSION) {
-		qWarning() << "Парсер .ttptt: старая версия метаданных, возможны ошибки - " << version;
+		qWarning() << "ttptt parser: old metadata version, errors possible -" << version;
 	}
 
 	QVector<Tim::Group> groups;
@@ -1119,14 +1156,14 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 
 	if (groups.isEmpty()) {
 		if (!silent)
-			showMsgBox(this, QMessageBox::Critical, "Ошибка", "Файл не содержит групп TIM");
+			showMsgBox(this, QMessageBox::Critical, tr("Error"), tr("The file contains no TIM groups"));
 		return false;
 	}
 
 	m_groups = groups;
 	m_entries.clear();
 	if (!m_groups.isEmpty() && !m_groups.first().prefix.isEmpty())
-		qInfo() << QString("Проект содержит префикс перед первым TIM: %1 байт")
+		qInfo() << QString("Project contains a prefix before first TIM: %1 bytes")
 					   .arg(m_groups.first().prefix.size());
 	for (int gi = 0; gi < m_groups.size(); ++gi) {
 		if (m_groups[gi].images.isEmpty()) m_entries.append({ gi, -1 });
@@ -1148,7 +1185,7 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	m_sourceStem = QFileInfo(path).completeBaseName();
 	m_dirty = false;
 
-	// Подхват изображений или заглушек
+	// Pick up images or placeholders
 	QStringList importedImages = importImagesForTtptt(QFileInfo(path).absolutePath(), m_sourceStem);
 
 	rememberDir(path);
@@ -1156,16 +1193,16 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 	refreshAll();
 	updateTitle();
 
-	QString statusMsg = QString("Метаданные: %1 | групп: %2 | изобр.: %3")
+	QString statusMsg = tr("Metadata: %1 | groups: %2 | images: %3")
 		.arg(QFileInfo(path).fileName()).arg(m_groups.size()).arg(m_entries.size());
 	if (!importedImages.isEmpty())
-		statusMsg += QString(" | Изображение: %1").arg(importedImages.size());
+		statusMsg += tr(" | Images: %1").arg(importedImages.size());
 	if (!sourcePath.isEmpty())
-		statusMsg += QString(" | исходник: %1").arg(QFileInfo(sourcePath).fileName());
+		statusMsg += tr(" | source: %1").arg(QFileInfo(sourcePath).fileName());
 	setStatus(statusMsg);
 	qInfo() << statusMsg;
 	if (!importedImages.isEmpty())
-		qInfo() << "Подхвачены изображения:" << importedImages.join(", ");
+		qInfo() << "Picked up images:" << importedImages.join(", ");
 	return true;
 }
 
@@ -1215,25 +1252,25 @@ QStringList MainWindow::importImagesForTtptt(const QString &dirPath, const QStri
 				palColors = Tim::safeClutFlat(g, nullptr, nullptr);
 
 			im = Placeholder::makeMissingImage(w, h, preferredName, palColors);
-			qWarning() << "Нет изображения для image #" << it.globalIdx
-					   << "- вставлена заглушка" << w << "x" << h;
+			qWarning() << "No image for image #" << it.globalIdx
+					   << "- inserted placeholder" << w << "x" << h;
 		}
 
 		im = Tim::normalizeImageForTim(im, w, h);
 
 		const int palRow = qBound(0, m_paletteRow, qMax(0, int(g.clutHeader.height) - 1));
 		if (!Tim::applyEncodedToImage(g, it.imgIdx, im, palRow))
-			qWarning() << "Не удалось закодировать изображение для img#" << it.imgIdx;
+			qWarning() << "Failed to encode image for img#" << it.imgIdx;
 	}
 	return imported;
 }
 
 void MainWindow::closeFile() {
 	if (m_batchRunning || !confirmDiscard()) return;
-	qInfo() << "Закрытие файла:"
+	qInfo() << "Closing file:"
 			<< (!m_sourcePath.isEmpty() ? QFileInfo(m_sourcePath).fileName()
 				: (!m_ttpttPath.isEmpty() ? QFileInfo(m_ttpttPath).fileName()
-										  : "(без имени)"));
+										  : "(unnamed)"));
 	m_groups.clear();
 	m_entries.clear();
 	m_currentEntry = -1;
@@ -1244,7 +1281,7 @@ void MainWindow::closeFile() {
 	m_dirty = false;
 	refreshAll();
 	updateTitle();
-	setStatus("Закрыто.");
+	setStatus(tr("Closed."));
 }
 
 void MainWindow::prevImage() {
@@ -1290,7 +1327,7 @@ void MainWindow::toggleStp() {
     m_showStp = !m_showStp;
     if (m_stpAction) m_stpAction->setChecked(m_showStp);
     if (m_stpBtn)    m_stpBtn->setChecked(m_showStp);
-    qInfo() << "Прозрачность (STP):" << (m_showStp ? "вкл" : "выкл");
+    qInfo() << "Transparency (STP):" << (m_showStp ? "on" : "off");
     refreshPreview();
 }
 
@@ -1326,7 +1363,7 @@ void MainWindow::onBppChanged(int index) {
     refreshPreview();
     updateTitle();
 
-    qInfo() << QString("bpp изменён на %1 (flags=0x%2)")
+    qInfo() << QString("bpp changed to %1 (flags=0x%2)")
         .arg(index)
         .arg(g->flags & 0xFF, 2, 16, QChar('0'));
 }
@@ -1366,26 +1403,26 @@ void MainWindow::applyMetadata() {
     rebuildAndReparse(true);
     updateTitle();
     if (!errors.isEmpty()) {
-        setStatus("Ошибки ввода: " + errors.join("; "));
-        showMsgBox(this, QMessageBox::Warning, "Ошибки ввода", errors.join("\n"));
+        setStatus(tr("Input errors: ") + errors.join("; "));
+        showMsgBox(this, QMessageBox::Warning, tr("Input errors"), errors.join("\n"));
     } else {
-        setStatus("Применено.");
+        setStatus(tr("Applied."));
     }
-    qInfo() << QString("Метаданные применены (bpp=%1, flags=0x%2)")
+    qInfo() << QString("Metadata applied (bpp=%1, flags=0x%2)")
         .arg(bpp).arg(savedFlags & 0xFF, 2, 16, QChar('0'));
 }
 
 void MainWindow::resetMetadata() {
 	if (blockedByBatch()) return;
     if (!m_sourcePath.isEmpty()) {
-        qInfo() << "Сброс метаданных — перечитывание" << QFileInfo(m_sourcePath).fileName();
+        qInfo() << "Resetting metadata — reloading" << QFileInfo(m_sourcePath).fileName();
         loadTimFromPath(m_sourcePath, true);
         refreshAll(); 
-		setStatus("Сброшено.");
+		setStatus(tr("Reset."));
     } else if (!m_ttpttPath.isEmpty()) {
-        qInfo() << "Сброс метаданных — перечитывание" << QFileInfo(m_ttpttPath).fileName();
+        qInfo() << "Resetting metadata — reloading" << QFileInfo(m_ttpttPath).fileName();
         loadTtpttFromPath(m_ttpttPath, true);
-        setStatus("Сброшено.");
+        setStatus(tr("Reset."));
     }
 }
 void MainWindow::convertTo16bpp() { convertBpp(2); }
@@ -1421,7 +1458,7 @@ void MainWindow::convertBpp(int targetBpp) {
         g->flags = (g->flags & ~0x7u) | quint32(currentBpp);
         g->images[ii].header.widthWords = oldWW;
         g->images[ii].header.size      = oldSz;
-        setStatus("Конвертация не удалась — изменения отменены");
+        setStatus(tr("Conversion failed — changes reverted"));
         return;
     }
     g->images[ii].data = newData;
@@ -1430,7 +1467,7 @@ void MainWindow::convertBpp(int targetBpp) {
     rebuildAndReparse(true);
     m_dirty = true;
     updateTitle();
-    qInfo() << QString("Конвертация bpp: %1bpp → %2bpp (%3x%4)")
+    qInfo() << QString("bpp conversion: %1bpp -> %2bpp (%3x%4)")
         .arg(currentBpp * 8).arg(targetBpp * 8).arg(oldW).arg(oldH);
 }
 
@@ -1445,11 +1482,11 @@ void MainWindow::splitImage() {
     const int height     = g->images[ii].header.height;
 
     if (widthWords < 2) {
-        setStatus("Нельзя разделить: слишком узкое изображение");
+        setStatus(tr("Cannot split: image is too narrow"));
         return;
     }
     if (widthWords % 2 != 0) {
-        setStatus("Нельзя разделить: нечётное число 16-битных слов в ширине");
+        setStatus(tr("Cannot split: odd number of 16-bit words in width"));
         return;
     }
 
@@ -1467,7 +1504,7 @@ void MainWindow::splitImage() {
     imL.header.widthWords = quint16(halfWW);
     imL.data = Tim::encodeImage(left, *g, imL.header, m_paletteRow);
     if (imL.data.isEmpty()) {
-        setStatus("Не удалось закодировать левую половину");
+        setStatus(tr("Failed to encode left half"));
         return;
     }
     imL.header.size = 12 + imL.data.size();
@@ -1477,7 +1514,7 @@ void MainWindow::splitImage() {
     imR.header.x = quint16(g->images[ii].header.x + halfW);
     imR.data = Tim::encodeImage(right, *g, imR.header, m_paletteRow);
     if (imR.data.isEmpty()) {
-        setStatus("Не удалось закодировать правую половину");
+        setStatus(tr("Failed to encode right half"));
         return;
     }
     imR.header.size = 12 + imR.data.size();
@@ -1487,7 +1524,7 @@ void MainWindow::splitImage() {
     rebuildAndReparse(true);
     m_dirty = true;
     updateTitle();
-    qInfo() << QString("Изображение разделено: %1x%2 → два %3x%4")
+    qInfo() << QString("Image split: %1x%2 -> two %3x%4")
         .arg(Tim::widthWordsToPixels(bpp, widthWords)).arg(height)
         .arg(halfW).arg(height);
 }
@@ -1512,7 +1549,7 @@ void MainWindow::mergeImages(bool withNext) {
     const int h2  = g->images[idx2].header.height;
 
     if (h1 != h2) {
-        setStatus("Нельзя слить: разная высота изображений");
+        setStatus(tr("Cannot merge: image heights differ"));
         return;
     }
 
@@ -1537,7 +1574,7 @@ void MainWindow::mergeImages(bool withNext) {
     mergedIm.header.widthWords = quint16(newWW);
     mergedIm.data = Tim::encodeImage(merged, *g, mergedIm.header, m_paletteRow);
     if (mergedIm.data.isEmpty()) {
-        setStatus("Не удалось закодировать слитое изображение");
+        setStatus(tr("Failed to encode merged image"));
         return;
     }
     mergedIm.header.size = 12 + mergedIm.data.size();
@@ -1549,7 +1586,7 @@ void MainWindow::mergeImages(bool withNext) {
     rebuildAndReparse(true);
     m_dirty = true;
     updateTitle();
-    qInfo() << QString("Изображения слиты: %1x%2 + %3x%4 → %5x%6")
+    qInfo() << QString("Images merged: %1x%2 + %3x%4 -> %5x%6")
         .arg(w1).arg(h1).arg(w2).arg(h2).arg(actualW).arg(h1);
 }
 
@@ -1574,9 +1611,9 @@ void MainWindow::exportPalette() {
 
 	QString selectedFilter;
 	QString path = QFileDialog::getSaveFileName(
-		this, "Save palette",
+		this, tr("Save palette"),
 		defaultSavePath(m_sourceStem + "_palette.act"),
-		"Adobe Color Table (*.act);;JASC Palette (*.pal);;GIMP Palette (*.gpl);;PNG (*.png);;BMP (*.bmp)",
+		tr("Adobe Color Table (*.act);;JASC Palette (*.pal);;GIMP Palette (*.gpl);;PNG (*.png);;BMP (*.bmp)"),
 		&selectedFilter);
 	if (path.isEmpty()) return;
 	if (QFileInfo(path).suffix().isEmpty()) {
@@ -1590,15 +1627,15 @@ void MainWindow::exportPalette() {
 
 	QString err;
 	if (!Palettes::saveAny(path, flat, cw, ch, &err)) {
-		qWarning() << "Экспорт палитры не удался:" << path << err;
-		showMsgBox(this, QMessageBox::Critical, "Ошибка",
-				   "Не удалось сохранить палитру:\n" + err);
+		qWarning() << "Palette export failed:" << path << err;
+		showMsgBox(this, QMessageBox::Critical, tr("Error"),
+				   tr("Failed to save palette:\n") + err);
 		return;
 	}
 	rememberDir(path);
-	qInfo() << QString("Экспорт палитры: %1 (%2 цветов, %3x%4)")
+	qInfo() << QString("Palette export: %1 (%2 colors, %3x%4)")
 				   .arg(path).arg(flat.size()).arg(cw).arg(ch);
-	setStatus("Палитра сохранена: " + path);
+	setStatus(tr("Palette saved: ") + path);
 }
 
 void MainWindow::importPalette() {
@@ -1607,8 +1644,8 @@ void MainWindow::importPalette() {
 	if (!g || !g->hasClut) return;
 
 	QString path = QFileDialog::getOpenFileName(
-		this, "Load palette", initialDir(),
-		"Pals (*.pal *.act *.gpl);;Pals PNG/BMP (*.png *.bmp)");
+		this, tr("Load palette"), initialDir(),
+		tr("Palettes (*.pal *.act *.gpl);;Palette images PNG/BMP (*.png *.bmp)"));
 	if (path.isEmpty()) return;
 
 	importPaletteFromPath(path);
@@ -1625,7 +1662,7 @@ bool MainWindow::importPaletteFromPath(const QString &path) {
 	QByteArray clut(target * 2, '\0'); uchar *p = reinterpret_cast<uchar*>(clut.data());
 	for (int i = 0; i < target; ++i) Tim::wr16(p + i * 2, Tim::rgbToBgr555(pal[i].red(), pal[i].green(), pal[i].blue()));
 	g->clut = clut; g->clutHeader.size = 12 + clut.size(); m_dirty = true; rebuildAndReparse(true); rememberDir(path);
-	qInfo() << QString("Импортирована палитра из %1 (%2 цветов)").arg(QFileInfo(path).fileName()).arg(target);
+	qInfo() << QString("Imported palette from %1 (%2 colors)").arg(QFileInfo(path).fileName()).arg(target);
 	return true;
 }
 
@@ -1635,7 +1672,7 @@ void MainWindow::replaceImage() {
 	if (!g || ii < 0) return;
 	int w = Tim::widthWordsToPixels(g->bpp, g->images[ii].header.widthWords);
 	int h = g->images[ii].header.height;
-	QString path = QFileDialog::getOpenFileName(this, QString("Img (%1x%2)").arg(w).arg(h), initialDir(), "Img (*.png *.bmp)");
+	QString path = QFileDialog::getOpenFileName(this, tr("Image (%1x%2)").arg(w).arg(h), initialDir(), tr("Image (*.png *.bmp)"));
 	if (!path.isEmpty()) replaceImageFromPath(path);
 }
 
@@ -1650,9 +1687,9 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
 
     if (QFileInfo(path).suffix().toLower() == "bmp" &&
         g->bpp == 2 && imageHasStpPixels(g->images[ii], g->bpp)) {
-        if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
-            tr("В текущем 16bpp-изображении есть STP-пиксели.\n"
-               "BMP не хранит альфа-канал — STP-биты будут сброшены.\n\nПродолжить?"),
+        if (showMsgBox(this, QMessageBox::Warning, tr("BMP and STP"),
+            tr("The current 16bpp image contains STP pixels.\n"
+               "BMP has no alpha channel — STP bits will be reset.\n\nContinue?"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
             return false;
     }
@@ -1669,20 +1706,20 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
     const bool sizeChanged = (actualW != oldW || newH != oldH);
     const bool padNeeded   = (img.width() != actualW);
 
-    qInfo() << "Замена изображения из" << QFileInfo(path).fileName();
+    qInfo() << "Replacing image from" << QFileInfo(path).fileName();
 
     if (sizeChanged || padNeeded) {
-        QString msg = QString("TIM заголовок изображения будет обновлён по файлу:\n"
-                              "  файл: %1x%2\n"
-                              "  было: width_words=%3, height=%4 (%5x%6)\n"
-                              "  станет: width_words=%7, height=%8 (%9x%10)")
+        QString msg = tr("TIM image header will be updated to match the file:\n"
+                         "  file:     %1x%2\n"
+                         "  was:      width_words=%3, height=%4 (%5x%6)\n"
+                         "  will be:  width_words=%7, height=%8 (%9x%10)")
             .arg(img.width()).arg(img.height())
             .arg(oldWW).arg(oldH).arg(oldW).arg(oldH)
             .arg(newWW).arg(newH).arg(actualW).arg(newH);
         if (padNeeded)
-            msg += QString("\n\nШирина будет дополнена прозрачными пикселями до %1 px.")
+            msg += tr("\n\nWidth will be padded with transparent pixels to %1 px.")
                 .arg(actualW);
-        if (showMsgBox(this, QMessageBox::Question, "Замена изображения", msg,
+        if (showMsgBox(this, QMessageBox::Question, tr("Replace Image"), msg,
                        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes)
             return false;
     }
@@ -1705,7 +1742,7 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
     if (newData.isEmpty()) {
         qWarning() << "replaceImage: encodeImage failed for" << path
                    << "bpp=" << bpp << "size=" << actualW << "x" << newH;
-        setStatus(tr("Не удалось закодировать изображение — изменения отменены"));
+        setStatus(tr("Failed to encode image — changes reverted"));
         return false;
     }
     newHeader.size = 12 + newData.size();
@@ -1718,10 +1755,10 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
     m_dirty = true;
     updateTitle();
 
-    qInfo() << QString("Изображение заменено: %1x%2 → %3x%4 (ww=%5, h=%6, %7 байт)")
+    qInfo() << QString("Image replaced: %1x%2 -> %3x%4 (ww=%5, h=%6, %7 bytes)")
         .arg(oldW).arg(oldH).arg(actualW).arg(newH).arg(newWW).arg(newH)
         .arg(newData.size());
-    setStatus(QString("Изображение заменено: %1x%2 (было %3x%4)")
+    setStatus(tr("Image replaced: %1x%2 (was %3x%4)")
         .arg(actualW).arg(newH).arg(oldW).arg(oldH));
     return true;
 }
@@ -1731,15 +1768,15 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
 // =====================================================================
 void MainWindow::batchExtract() {
     if (m_batchRunning) {
-        showMsgBox(this, QMessageBox::Information, "Инфо", "Уже выполняется.");
+        showMsgBox(this, QMessageBox::Information, tr("Info"), tr("Already running."));
         return;
     }
-    QString folder = QFileDialog::getExistingDirectory(this, "Папка", initialDir());
+    QString folder = QFileDialog::getExistingDirectory(this, tr("Folder"), initialDir());
     if (folder.isEmpty()) return;
     QDir dir(folder);
     QStringList filesInDir = dir.entryList(QDir::Files);
     if (filesInDir.isEmpty()) {
-        showMsgBox(this, QMessageBox::Information, "Инфо", "Пусто.");
+        showMsgBox(this, QMessageBox::Information, tr("Info"), tr("Empty."));
         return;
     }
 
@@ -1763,13 +1800,13 @@ void MainWindow::batchExtract() {
 
     const QString imageExt = "." + p.imageFormat;
 
-    qInfo() << QString("Пакетное извлечение: папка %1 (%2 файлов), формат %3, "
+    qInfo() << QString("Batch extract: folder %1 (%2 files), format %3, "
                        "ACT:%4 PAL:%5 GPL:%6 .ttptt:%7 allPal:%8")
         .arg(folder).arg(filesInDir.size()).arg(p.imageFormat)
         .arg(p.saveAct).arg(p.savePal).arg(p.saveGpl)
         .arg(p.saveTtptt).arg(p.saveAllPalettes);
     m_batchRunning = true;
-    setStatus("Извлечение...");
+    setStatus(tr("Extracting..."));
     rememberDir(folder + "/x");
 
     m_batchThread = new QThread(this);
@@ -1797,14 +1834,14 @@ void MainWindow::batchExtract() {
 }
 
 void MainWindow::batchReplace() {
-	if (m_batchRunning) { showMsgBox(this, QMessageBox::Information, "Инфо", "Уже выполняется."); return; }
-	QString folder = QFileDialog::getExistingDirectory(this, "Папка", initialDir()); if (folder.isEmpty()) return;
+	if (m_batchRunning) { showMsgBox(this, QMessageBox::Information, tr("Info"), tr("Already running.")); return; }
+	QString folder = QFileDialog::getExistingDirectory(this, tr("Folder"), initialDir()); if (folder.isEmpty()) return;
 	QDir dir(folder); QStringList filesInDir = dir.entryList(QDir::Files);
-	if (filesInDir.isEmpty()) { showMsgBox(this, QMessageBox::Information, "Инфо", "Пусто."); return; }
-	if (showMsgBox(this, QMessageBox::Question, "Замена", "Перезаписать TIM?",
+	if (filesInDir.isEmpty()) { showMsgBox(this, QMessageBox::Information, tr("Info"), tr("Empty.")); return; }
+	if (showMsgBox(this, QMessageBox::Question, tr("Replace"), tr("Overwrite TIM?"),
 				   QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) return;
-	qInfo() << QString("Пакетная замена: папка %1 (%2 файлов)").arg(folder).arg(filesInDir.size());
-	m_batchRunning = true; setStatus("Замена..."); rememberDir(folder + "/x");
+	qInfo() << QString("Batch replace: folder %1 (%2 files)").arg(folder).arg(filesInDir.size());
+	m_batchRunning = true; setStatus(tr("Replacing...")); rememberDir(folder + "/x");
 	QString currentSource = m_sourcePath;
 	m_batchThread = new QThread(this); BatchWorker *worker = new BatchWorker(); worker->moveToThread(m_batchThread);
 	connect(m_batchThread, &QThread::started, worker, [=]() { worker->runReplace(folder, currentSource); });
@@ -1819,7 +1856,7 @@ void MainWindow::batchReplace() {
 }
 
 void MainWindow::onBatchProgress(int current, int total, const QString &fileName) {
-	QString prefix = QString("%1/%2 — ").arg(current).arg(total);
+	QString prefix = tr("%1/%2 — ").arg(current).arg(total);
 	const QFontMetrics fm = m_statusLabel->fontMetrics();
 #if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
 	const int prefixW = fm.horizontalAdvance(prefix);
@@ -1841,20 +1878,20 @@ void MainWindow::onBatchFinished(const QString &summary, const QStringList &erro
 	if (openedFileRewritten && !m_sourcePath.isEmpty()) loadTimFromPath(m_sourcePath, true);
 
 	QString msg = summary;
-	if (!errors.isEmpty()) msg += "\n\nОшибки:\n" + errors.mid(0, 10).join("\n");
+	if (!errors.isEmpty()) msg += tr("\n\nErrors:\n") + errors.mid(0, 10).join("\n");
 	if (!warnings.isEmpty()) {
-		msg += QString("\n\nУведомления (размеры не совпали с TIM): %1\n%2")
+		msg += tr("\n\nWarnings (sizes do not match TIM): %1\n%2")
 			.arg(warnings.size())
 			.arg(warnings.mid(0, 30).join("\n"));
-		if (warnings.size() > 30) msg += QString("\n...и ещё %1").arg(warnings.size() - 30);
+		if (warnings.size() > 30) msg += tr("\n...and %1 more").arg(warnings.size() - 30);
 		for (const auto &w : warnings) qWarning() << "size mismatch:" << w;
 	}
 
 	qInfo() << summary;
-	showMsgBox(this, QMessageBox::Information, "Готово", msg);
+	showMsgBox(this, QMessageBox::Information, tr("Done"), msg);
 
 	const QString statusLine = summary.section('\n', 0, 0).trimmed();
-	setStatus(statusLine.isEmpty() ? tr("Готово.") : statusLine);
+	setStatus(statusLine.isEmpty() ? tr("Ready.") : statusLine);
 }
 
 // =====================================================================
@@ -1902,7 +1939,7 @@ void MainWindow::refreshPalette() {
 	}
 	m_paletteLabel->setPixmap(QPixmap::fromImage(img));
 	if (m_palInfoLabel)
-		m_palInfoLabel->setText(QString("%1 стр. / %2 цветов").arg(ch).arg(n));
+		m_palInfoLabel->setText(tr("%1 rows / %2 colors").arg(ch).arg(n));
 }
 
 void MainWindow::onPreviewClick(const QPoint &labelPos) {
@@ -1956,13 +1993,13 @@ void MainWindow::onPreviewClick(const QPoint &labelPos) {
 			QColor c = QColor::fromRgb(Tim::bgr555ToRgb(raw));
 			bool stp = (raw & 0x8000) != 0;
 			QString hex = QString("0x%1").arg(raw, 4, 16, QChar('0')).toUpper();
-			msg = QString("px: (%1,%2) ИНДЕКС[%3]: RGB=(%4,%5,%6) BGR555=%7%8")
+			msg = tr("px: (%1,%2) INDEX[%3]: RGB=(%4,%5,%6) BGR555=%7%8")
 				.arg(sx).arg(sy).arg(idx)
 				.arg(c.red()).arg(c.green()).arg(c.blue())
 				.arg(hex)
 				.arg(stp ? " [STP]" : "");
 		} else {
-			msg = QString("px (%1,%2) idx %3").arg(sx).arg(sy).arg(idx);
+			msg = tr("px (%1,%2) idx %3").arg(sx).arg(sy).arg(idx);
 		}
 	} else if (bpp == 2) {
 		int pxi = sy * width + sx;
@@ -1976,7 +2013,7 @@ void MainWindow::onPreviewClick(const QPoint &labelPos) {
 		int bv = (b << 3) | (b >> 2);
 		bool stp = (c16 & 0x8000) != 0;
 		QString hex = QString("0x%1").arg(c16, 4, 16, QChar('0')).toUpper();
-		msg = QString("px (%1,%2): RGB=(%3,%4,%5) BGR555=%6%7")
+		msg = tr("px (%1,%2): RGB=(%3,%4,%5) BGR555=%6%7")
 			.arg(sx).arg(sy).arg(rr).arg(gv).arg(bv)
 			.arg(hex)
 			.arg(stp ? " [STP]" : "");
@@ -1985,10 +2022,10 @@ void MainWindow::onPreviewClick(const QPoint &labelPos) {
 		int pos = sy * stride + sx * 3;
 		if (pos + 2 < data.size()) {
 			const uchar *p = reinterpret_cast<const uchar*>(data.constData() + pos);
-			msg = QString("px (%1,%2): RGB=(%3,%4,%5)")
+			msg = tr("px (%1,%2): RGB=(%3,%4,%5)")
 				.arg(sx).arg(sy).arg(p[0]).arg(p[1]).arg(p[2]);
 		} else {
-			msg = QString("px (%1,%2)").arg(sx).arg(sy);
+			msg = tr("px (%1,%2)").arg(sx).arg(sy);
 		}
 	}
 
@@ -1998,7 +2035,7 @@ void MainWindow::onPreviewClick(const QPoint &labelPos) {
 void MainWindow::onPaletteClick(int x) {
 	for (const auto &c : m_palCells) {
 		if (x >= c.x0 && x < c.x1) {
-			setStatus(QString("ИНДЕКС[%1]: RGB=(%2,%3,%4) BGR555=0x%5").arg(c.idx).arg(c.r).arg(c.g).arg(c.b).arg(c.raw, 4, 16, QChar('0')).toUpper());
+			setStatus(tr("INDEX[%1]: RGB=(%2,%3,%4) BGR555=0x%5").arg(c.idx).arg(c.r).arg(c.g).arg(c.b).arg(c.raw, 4, 16, QChar('0')).toUpper());
 			return;
 		}
 	}
@@ -2021,8 +2058,8 @@ void MainWindow::editPaletteColor(int idx) {
 
 	QColor chosen = QColorDialog::getColor(
 		current, this,
-		tr("ИНДЕКС [%1] — палитра %2").arg(idx).arg(m_paletteRow));
-	if (!chosen.isValid()) return;   // отмена
+		tr("INDEX [%1] — palette %2").arg(idx).arg(m_paletteRow));
+	if (!chosen.isValid()) return;   // canceled
 
 	quint16 newRaw = Tim::rgbToBgr555(
 		chosen.red(), chosen.green(), chosen.blue(), stp ? 1 : 0);
@@ -2034,9 +2071,9 @@ void MainWindow::editPaletteColor(int idx) {
 	updateTitle();
 	refreshPalette();
 	refreshPreview();
-	setStatus(QString("ИНДЕКС[%1] изменён: RGB=(%2,%3,%4)")
+	setStatus(tr("INDEX[%1] changed: RGB=(%2,%3,%4)")
 		.arg(idx).arg(chosen.red()).arg(chosen.green()).arg(chosen.blue()));
-	qInfo() << QString("Палитра %1, индекс %2 -> RGB(%3,%4,%5)")
+	qInfo() << QString("Palette %1, index %2 -> RGB(%3,%4,%5)")
 		.arg(m_paletteRow).arg(idx)
 		.arg(chosen.red()).arg(chosen.green()).arg(chosen.blue());
 }
@@ -2059,7 +2096,7 @@ void MainWindow::refreshPreview() {
 			return;
 		}
 		QImage img = Placeholder::renderPlaceholder(
-			sz, font(), tr("Откройте TIM"), tr("PS1 навсегда · ttptt"));
+			sz, font(), tr("Open a TIM file"), tr("PS1 forever · ttptt"));
 		m_previewLabel->setPixmap(img.isNull() ? QPixmap()
 											   : QPixmap::fromImage(img));
 		return;
@@ -2102,7 +2139,7 @@ void MainWindow::refreshParams() {
 	if (ii >= 0 && ii < g->images.size()) {
 		auto &h = g->images[ii].header; m_imgSizeEdit->setText(QString::number(h.size)); m_imgXEdit->setText(QString::number(h.x)); m_imgYEdit->setText(QString::number(h.y));
 		m_imgWidthEdit->setText(QString::number(h.widthWords)); m_imgHeightEdit->setText(QString::number(h.height));
-		m_imagePixelsLabel->setText(QString("%1 * %2 px").arg(Tim::widthWordsToPixels(g->bpp, h.widthWords)).arg(h.height));
+		m_imagePixelsLabel->setText(tr("%1 * %2 px").arg(Tim::widthWordsToPixels(g->bpp, h.widthWords)).arg(h.height));
 	} else { for (auto *e : {m_imgSizeEdit, m_imgXEdit, m_imgYEdit, m_imgWidthEdit, m_imgHeightEdit}) e->clear(); m_imagePixelsLabel->clear(); }
 	m_suppressSizeTrace = false;
 }
@@ -2124,7 +2161,7 @@ void MainWindow::updateFlagsDisplay() {
 void MainWindow::updateImagePixelsLabel() {
 	if (m_suppressSizeTrace) return; int bpp = m_bppCombo->currentIndex(); if (bpp < 0) { m_imagePixelsLabel->clear(); return; }
 	int ww, hh; if (!parseFlexible(m_imgWidthEdit->text(), &ww) || !parseFlexible(m_imgHeightEdit->text(), &hh) || ww <= 0 || hh <= 0) { m_imagePixelsLabel->clear(); return; }
-	m_imagePixelsLabel->setText(QString("%1 * %2 px").arg(Tim::widthWordsToPixels(bpp, ww)).arg(hh));
+	m_imagePixelsLabel->setText(tr("%1 * %2 px").arg(Tim::widthWordsToPixels(bpp, ww)).arg(hh));
 }
 
 void MainWindow::recomputeSizeFromDims(QLineEdit *wEdit, QLineEdit *hEdit,
@@ -2174,7 +2211,7 @@ void MainWindow::applyTheme(bool dark) {
 
 void MainWindow::closeEvent(QCloseEvent *e) {
 	if (!confirmDiscard()) { e->ignore(); return; }
-	qInfo() << "Выход из приложения";
+	qInfo() << "Application exit";
 	m_shuttingDown = true;
 	saveConfig();
 	if (m_logWindow) m_logWindow->close();
@@ -2196,27 +2233,27 @@ void MainWindow::dispatchDroppedFile(const QString &path) {
 	if (blockedByBatch()) return;
     QString ext = QFileInfo(path).suffix().toLower();
 
-    qInfo() << "Перетащен файл:" << QFileInfo(path).fileName();
+    qInfo() << "Dropped file:" << QFileInfo(path).fileName();
     if (ext == "png" || ext == "bmp") { replaceImageFromPath(path); return; }
     if (ext == "pal" || ext == "act" || ext == "gpl") { importPaletteFromPath(path); return; }
-    if (!confirmDiscard()) { qInfo() << "Открытие отменено пользователем"; return; }
+    if (!confirmDiscard()) { qInfo() << "Opening canceled by user"; return; }
     if (loadTimFromPath(path, true)) return;
-    qInfo() << "Не удалось открыть как TIM, пробую как сырой TIM";
+    qInfo() << "Failed to open as TIM, trying as raw TIM";
     loadRawTimFromPath(path, false, true);
 }
 
 void MainWindow::openPathFromCommandLine(const QString &path) {
 	if (path.isEmpty()) return;
 	if (!QFileInfo::exists(path)) {
-		setStatus(tr("Файл не найден: %1").arg(path));
+		setStatus(tr("File not found: %1").arg(path));
 		return;
 	}
 	if (m_batchRunning) {
-		setStatus(tr("Идёт пакетная операция — отложено"));
+		setStatus(tr("Batch operation in progress — deferred"));
 		return;
 	}
 
-	qInfo() << "Открытие из командной строки:" << QFileInfo(path).fileName();
+	qInfo() << "Opening from command line:" << QFileInfo(path).fileName();
 	dispatchDroppedFile(path);
 }
 
@@ -2226,8 +2263,8 @@ void MainWindow::setStatus(const QString &msg) {
 
 bool MainWindow::blockedByBatch() {
     if (!m_batchRunning) return false;
-    setStatus(tr("Идёт пакетная операция — действие отклонено"));
-    qInfo() << "Действие заблокировано: идёт пакетная операция";
+    setStatus(tr("Batch operation in progress — action rejected"));
+    qInfo() << "Action blocked: batch operation in progress";
     return true;
 }
 

@@ -8,6 +8,7 @@
 #include "palettes.h"
 
 #include <QAbstractButton>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -31,24 +32,37 @@ QMessageBox::StandardButton showMsgBox(
 
     struct BtnLabel { QMessageBox::StandardButton b; const char *t; };
     static const BtnLabel kLabels[] = {
-        { QMessageBox::Ok,	  "OK" }, { QMessageBox::Yes,	 "Да" },
-        { QMessageBox::No,	  "Нет" }, { QMessageBox::Save,	"Сохранить" },
-        { QMessageBox::Discard, "Не сохранять" }, { QMessageBox::Cancel,  "Отмена" },
-        { QMessageBox::Close,   "Закрыть" }, { QMessageBox::Abort,   "Прервать" },
-        { QMessageBox::Retry,   "Повторить" }, { QMessageBox::Ignore,  "Пропустить" },
+        { QMessageBox::Ok,      QT_TRANSLATE_NOOP("timhelpers", "OK") },
+        { QMessageBox::Yes,     QT_TRANSLATE_NOOP("timhelpers", "Yes") },
+        { QMessageBox::No,      QT_TRANSLATE_NOOP("timhelpers", "No") },
+        { QMessageBox::Save,    QT_TRANSLATE_NOOP("timhelpers", "Save") },
+        { QMessageBox::Discard, QT_TRANSLATE_NOOP("timhelpers", "Don't Save") },
+        { QMessageBox::Cancel,  QT_TRANSLATE_NOOP("timhelpers", "Cancel") },
+        { QMessageBox::Close,   QT_TRANSLATE_NOOP("timhelpers", "Close") },
+        { QMessageBox::Abort,   QT_TRANSLATE_NOOP("timhelpers", "Abort") },
+        { QMessageBox::Retry,   QT_TRANSLATE_NOOP("timhelpers", "Retry") },
+        { QMessageBox::Ignore,  QT_TRANSLATE_NOOP("timhelpers", "Ignore") },
     };
     for (const auto &l : kLabels)
-        if (auto *b = box.button(l.b)) b->setText(QString::fromUtf8(l.t));
+        if (auto *b = box.button(l.b))
+            b->setText(QCoreApplication::translate("timhelpers", l.t));
 
     return static_cast<QMessageBox::StandardButton>(box.exec());
 }
 
 bool parseFlexible(const QString &sIn, int *out, QString *err) {
     QString s = sIn.trimmed();
-    if (s.isEmpty()) { if (err) *err = "Пустое значение"; return false; }
+    if (s.isEmpty()) {
+        if (err) *err = QCoreApplication::translate("timhelpers", "Empty value");
+        return false;
+    }
     bool ok = false;
     int v = s.toInt(&ok, 0);
-    if (!ok) { if (err) *err = "Не число: " + sIn; return false; }
+    if (!ok) {
+        if (err)
+            *err = QCoreApplication::translate("timhelpers", "Not a number: %1").arg(sIn);
+        return false;
+    }
     *out = v;
     return true;
 }

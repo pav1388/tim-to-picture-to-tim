@@ -35,7 +35,7 @@ static void messageHandler(QtMsgType type, const QMessageLogContext &, const QSt
 }
 
 LogWindow::LogWindow(QWidget *parent) : QWidget(parent, Qt::Window) {
-	setWindowTitle(tr("Журнал логов"));
+	setWindowTitle(tr("Log Window"));
 	resize(560, 400);
 
 	auto *layout = new QVBoxLayout(this);
@@ -46,8 +46,8 @@ LogWindow::LogWindow(QWidget *parent) : QWidget(parent, Qt::Window) {
 	layout->addWidget(m_text);
 
 	auto *btns = new QHBoxLayout();
-	auto *btnClear = new QPushButton(tr("Очистить"), this);
-	auto *btnCopy = new QPushButton(tr("Копировать"), this);
+	auto *btnClear = new QPushButton(tr("Clear"), this);
+	auto *btnCopy = new QPushButton(tr("Copy"), this);
 	btns->addWidget(btnClear);
 	btns->addWidget(btnCopy);
 	btns->addStretch();

@@ -17,6 +17,7 @@ class QLineEdit;
 class QPushButton;
 class QSettings;
 class QAction;
+class QActionGroup;
 class QMenu;
 class QEvent;
 class LogWindow;
@@ -72,6 +73,7 @@ private slots:
     void onClutDimsChanged();
     void onImageDimsChanged();
     void updateFlagsDisplay();
+    void onLanguageChanged(QAction *action);
 
     void openPathFromCommandLine(const QString &path);
 
@@ -146,6 +148,8 @@ private:
     bool m_saveAllPalettesBatch = false;
     bool m_showLog = false;
     bool m_shuttingDown = false;
+
+    QString m_language = QStringLiteral("en");
 
     QString m_batchImageFormat = "png";
     QSize m_previewSrcSize;

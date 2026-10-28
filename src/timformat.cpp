@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "timformat.h"
+#include <QCoreApplication>
 #include <QDebug>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -41,6 +42,8 @@ static void warn(Group *g, const QString &msg)
                 const int close = cur.indexOf(')', start);
                 if (close > start) n = cur.mid(start, close - start).toInt() + 1;
             }
+            // NOTE: " (×N)" suffix is NOT translated — it is used by the
+            // duplicate-detection logic above and must stay stable.
             g->warnings[i] = QString("%1 (×%2)").arg(msg).arg(n);
             return;
         }
@@ -56,7 +59,6 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 	if (offset + 8 > len) return false;
 
 	if (checkSignature) {
-		// if (!data.startsWith(QByteArray("\x10\x00\x00\x00", 4))) return false;
         quint32 magic = rd32(reinterpret_cast<const uchar*>(data.constData() + offset));
         if (magic != 0x10) return false;
         quint32 flags = rd32(reinterpret_cast<const uchar*>(data.constData() + offset + 4));
@@ -82,7 +84,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 	// ----- CLUT -----
 	if (out->hasClut) {
 		if (offset + 12 > len) {
-			warn(out, QStringLiteral("Обрезан заголовок CLUT"));
+			warn(out, QCoreApplication::translate("Tim", "Truncated CLUT header"));
 			out->clutHeader.size = 12;
 			out->clutHeader.x = 0;
 			out->clutHeader.y = 0;
@@ -96,7 +98,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 			quint16 cx = rd16(p + 4), cy = rd16(p + 6);
 			quint16 cw = rd16(p + 8), ch = rd16(p + 10);
 			if (size < 12 || size > 1024 * 1024) {
-				warn(out, QStringLiteral("Неверный размер CLUT"));
+				warn(out, QCoreApplication::translate("Tim", "Invalid CLUT size"));
 				size = 12; cw = qMin<quint16>(cw, 256); ch = qMin<quint16>(ch, 16);
 			}
 			offset += 12;
@@ -105,7 +107,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 				int maxE = qMax(1, declared / 2);
 				if (int(cw) > maxE) { cw = quint16(qMin<int>(cw, maxE)); ch = 1; }
 				else ch = quint16(qMax(1, qMin<int>(ch, maxE / qMax(1, int(cw)))));
-				warn(out, QStringLiteral("CLUT: cw*ch не соответствует size"));
+				warn(out, QCoreApplication::translate("Tim", "CLUT: widthWords * height does not match size"));
 			}
 			int need = int(size) - 12;
 			int avail = len - offset;
@@ -115,7 +117,7 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 			out->clutHeader.widthWords = cw;
 			out->clutHeader.height = ch;
 			if (avail < need) {
-				warn(out, QStringLiteral("CLUT обрезан"));
+				warn(out, QCoreApplication::translate("Tim", "CLUT truncated"));
 				out->clut = data.mid(offset);
 				offset = len;
 			} else {
@@ -136,13 +138,13 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		quint16 iw = rd16(p + 8), ih = rd16(p + 10);
 
 		if (size < 12 || size > 100u * 1024 * 1024) {
-			warn(out, QStringLiteral("Неверный размер блока image"));
+			warn(out, QCoreApplication::translate("Tim", "Invalid image block size"));
 			offset += 12;
 			continue;
 		}
 		if (iw == 0 || ih == 0 || iw > 2048 || ih > 2048 ||
 			quint32(iw) * 2 * ih > 4u * 1024 * 1024) {
-			warn(out, QStringLiteral("Нереалистичные размеры image"));
+			warn(out, QCoreApplication::translate("Tim", "Unrealistic image dimensions"));
 			int remaining = len - offset;
 			offset += (int(size) >= 12 && int(size) <= remaining) ? int(size) : 12;
 			continue;
@@ -150,18 +152,18 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		int expected = int(iw) * 2 * int(ih);
 		int declared = int(size) - 12;
 		if (declared > 50 * 1024 * 1024) {
-			warn(out, QStringLiteral("Слишком большой размер данных"));
+			warn(out, QCoreApplication::translate("Tim", "Data size too large"));
 			int remaining = len - offset;
 			offset += (int(size) >= 12 && int(size) <= remaining) ? int(size) : 12;
 			continue;
 		}
 		if (qAbs(declared - expected) > 4) {
-			warn(out, QStringLiteral("Несоответствие размера image"));
+			warn(out, QCoreApplication::translate("Tim", "Image size mismatch"));
 		}
 		int avail = len - offset - 12;
 		int dataLen = qMin(declared, avail);
 		if (dataLen <= 0) {
-			warn(out, QStringLiteral("Нет данных image"));
+			warn(out, QCoreApplication::translate("Tim", "No image data"));
 			break;
 		}
 
@@ -178,20 +180,16 @@ static bool parseGroup(const QByteArray &data, int offset, int *newOffset,
 		offset += advance;
 		++imgCount;
 		if (dataLen < declared) {
-			warn(out, QStringLiteral("Данные image обрезаны"));
+			warn(out, QCoreApplication::translate("Tim", "Image data truncated"));
 			break;
 		}
 	}
 
 	if (out->images.isEmpty() && out->hasImage)
-		warn(out, QStringLiteral("has_image=1, но image не найден"));
+		warn(out, QCoreApplication::translate("Tim", "has_image=1 but no image found"));
 	if (!out->images.isEmpty() && !out->hasImage)
-		warn(out, QStringLiteral("Изображение есть, но has_image=0"));
+		warn(out, QCoreApplication::translate("Tim", "Image present but has_image=0"));
 
-	// if (offset < len && data.mid(offset, 4) != QByteArray("\x10\x00\x00\x00", 4)) {
-		// out->extra = data.mid(offset);
-		// offset = len;
-	// }
 	if (offset < len && data.mid(offset, 4) != QByteArray("\x10\x00\x00\x00", 4)) {
 		int nextMagic = data.indexOf(QByteArray("\x10\x00\x00\x00", 4), offset);
 		if (nextMagic > offset) {
@@ -368,8 +366,9 @@ Group groupFromJson(const QJsonObject &o) {
 	return g;
 }
 
-// Валидация .ttptt перед открытием (не настроена и может отрицательно сказаться
-// на процессе, так как нет достаточной практики при работы с tim)
+// .ttptt validation before opening (disabled — not battle-tested and may
+// negatively affect the process because there is not enough practical
+// experience with TIM files yet)
 /* Group groupFromJson(const QJsonObject &o) {
     Group g;
     g.flags = quint32(o["flags"].toString().toULongLong());
@@ -408,7 +407,6 @@ Group groupFromJson(const QJsonObject &o) {
         if (im.header.height > 2048)     im.header.height = 2048;
         if (im.header.widthWords == 0 || im.header.height == 0) continue;
 
-        // отсекаем абсурдно большие изображения
         int pxW = widthWordsToPixels(g.bpp, im.header.widthWords);
         int pxH = im.header.height;
         if (qint64(pxW) * pxH > 16 * 1024 * 1024) continue;

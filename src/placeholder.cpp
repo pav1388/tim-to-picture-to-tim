@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "placeholder.h"
+#include <QCoreApplication>
 #include <QFontMetrics>
 #include <QPainter>
 #include <QRadialGradient>
@@ -28,7 +29,7 @@ inline double luma(const QColor &c) {
 namespace Placeholder {
 
 // =====================================================================
-// Кнопки геймпада: 0=△ 1=○ 2=× 3=□
+// Gamepad buttons: 0=△ 1=○ 2=× 3=□
 // =====================================================================
 void drawPSButton(QPainter &p, const QRectF &r, int type, const QColor &c) {
     p.save();
@@ -86,7 +87,7 @@ void drawPSButton(QPainter &p, const QRectF &r, int type, const QColor &c) {
 }
 
 // =====================================================================
-// Заглушка отсутствующего изображения
+// Missing-image placeholder
 // =====================================================================
 QImage makeMissingImage(int w, int h, const QString &imgName, const QVector<QColor> &palette)
 {
@@ -162,7 +163,7 @@ QImage makeMissingImage(int w, int h, const QString &imgName, const QVector<QCol
         return result;
     };
 
-    const QString dimensions = QString("%1×%2").arg(w).arg(h);
+    const QString dimensions = QCoreApplication::translate("Placeholder", "%1×%2").arg(w).arg(h);
 
     QStringList chosen;
     QFont chosenFont;
@@ -174,7 +175,10 @@ QImage makeMissingImage(int w, int h, const QString &imgName, const QVector<QCol
         font.setPixelSize(fs);
         const QFontMetrics fm(font);
 
-        const QStringList headers = { QStringLiteral("NO IMAGE"), QStringLiteral("NO") };
+        const QStringList headers = {
+            QCoreApplication::translate("Placeholder", "NO IMAGE"),
+            QCoreApplication::translate("Placeholder", "NO")
+        };
         for (const QString &headerText : headers) {
             QStringList baseLines = wrap(headerText, fm, availW);
             if (!imgName.isEmpty())
@@ -213,7 +217,7 @@ QImage makeMissingImage(int w, int h, const QString &imgName, const QVector<QCol
 }
 
 // =====================================================================
-// Утилиты
+// Utilities
 // =====================================================================
 namespace {
 
@@ -232,7 +236,7 @@ quint32 seedFrom(const QSize &sz) {
 
 constexpr double kPi = 3.14159265358979323846;
 
-// ---------- Фон ----------
+// ---------- Background ----------
 enum class BgPattern { Plain, VramGrid, DiagStripes, TiledButtons,
                        DotsGrid, HexGrid, Blocky, ScanBlocks };
 
@@ -319,7 +323,7 @@ void drawBgPattern(QPainter &p, const QSize &sz, BgPattern pat) {
     }
 }
 
-// ---------- Частицы ----------
+// ---------- Particles ----------
 enum class Particles { None, Dots, Stars, Sparks };
 
 void drawParticles(QPainter &p, const QSize &sz, Particles pat, Rng &rng) {
@@ -365,7 +369,7 @@ void drawParticles(QPainter &p, const QSize &sz, Particles pat, Rng &rng) {
     }
 }
 
-// ---------- Акцент ----------
+// ---------- Accent ----------
 enum class Accent { None, RadialGlow, LinearTint, CornerGlow };
 
 void drawAccent(QPainter &p, const QSize &sz, Accent a) {
@@ -397,7 +401,7 @@ void drawAccent(QPainter &p, const QSize &sz, Accent a) {
     }
 }
 
-// ---------- Пост ----------
+// ---------- Post ----------
 enum class Post { None, Scanlines, Vignette, Grain };
 
 void drawPost(QPainter &p, const QSize &sz, Post post, Rng &rng) {
@@ -418,7 +422,7 @@ void drawPost(QPainter &p, const QSize &sz, Post post, Rng &rng) {
     }
     case Post::Grain: {
         const int W = qMax(1, sz.width()), H = qMax(1, sz.height());
-        const int n = (W * H) / 100;   // заметно меньше зёрен
+        const int n = (W * H) / 100;   // deliberately fewer grains
         p.setPen(Qt::NoPen);
         for (int i = 0; i < n; ++i) {
             const quint32 r = rng.next();
@@ -432,7 +436,7 @@ void drawPost(QPainter &p, const QSize &sz, Post post, Rng &rng) {
     }
 }
 
-// ---------- Рамка ----------
+// ---------- Frame ----------
 enum class Frame { Sharp, Rounded, CropMarks };
 
 void drawCropMarks(QImage &img) {
@@ -466,7 +470,7 @@ void applyRounded(QImage &img) {
     dp.drawImage(0, 0, mask);
 }
 
-// ---------- Нижняя полоса ----------
+// ---------- Bottom bar ----------
 enum class BottomBar { None, Bgr555Bar, TextEgg, Watermark };
 
 void drawBottomBar(QPainter &p, const QSize &sz, BottomBar b) {
@@ -492,7 +496,8 @@ void drawBottomBar(QPainter &p, const QSize &sz, BottomBar b) {
         p.setFont(f);
         p.setPen(QColor(90, 100, 120));
         p.drawText(QRect(0, sz.height() - 22, sz.width(), 18),
-                   Qt::AlignHCenter | Qt::AlignTop, "PLEASE INSERT CD-ROM");
+                   Qt::AlignHCenter | Qt::AlignTop,
+                   QCoreApplication::translate("Placeholder", "PLEASE INSERT CD-ROM"));
         break;
     }
     case BottomBar::Watermark: {
@@ -509,7 +514,7 @@ void drawBottomBar(QPainter &p, const QSize &sz, BottomBar b) {
 }
 
 // =====================================================================
-// Порча текста
+// Text corruption
 // =====================================================================
 QString corruptText(const QString &in, Rng &rng, double rate) {
     static const char symbols[] = "#@!$%&*?<>[]{}~^|\\/+-=_";
@@ -532,7 +537,7 @@ QString corruptText(const QString &in, Rng &rng, double rate) {
 }
 
 // =====================================================================
-// Глитч-событие
+// Glitch event
 // =====================================================================
 void glitchEvent(QPainter &p, const QSize &sz, Rng &rng,
                     const QFont &baseFont, const QString &title)
@@ -594,7 +599,7 @@ void glitchEvent(QPainter &p, const QSize &sz, Rng &rng,
 }
 
 // =====================================================================
-// Контент: кнопки + текст
+// Content: buttons + text
 // =====================================================================
 void drawContent(QPainter &p, const QSize &sz, const QFont &baseFont,
                  const QString &title, const QString &subtitle)
@@ -663,7 +668,7 @@ void drawContent(QPainter &p, const QSize &sz, const QFont &baseFont,
 } // anonymous namespace
 
 // =====================================================================
-// Точка входа
+// Entry point
 // =====================================================================
 QImage renderPlaceholder(const QSize &sz, const QFont &baseFont,
                          const QString &title, const QString &subtitle)
@@ -680,7 +685,7 @@ QImage renderPlaceholder(const QSize &sz, const QFont &baseFont,
 
     Rng rng(seedFrom(sz));
 
-    // 0 = глитч, 1..3 = статичные пресеты. Сумма весов = 24.
+    // 0 = glitch, 1..3 = static presets. Total weight = 24.
     static const int kWeights[4] = { 3, 7, 7, 7 };
     int total = 0;
     for (int w : kWeights) total += w;
@@ -692,29 +697,29 @@ QImage renderPlaceholder(const QSize &sz, const QFont &baseFont,
         if (pick < acc) { style = i; break; }
     }
 
-    // 0: глитч
+    // 0: glitch
     if (style == 0) {
         glitchEvent(p, sz, rng, baseFont, title);
         p.end();
         return img;
     }
 
-    // 1..3: статичные пресеты
+    // 1..3: static presets
     switch (style) {
-    case 1: // Сетка VRAM
+    case 1: // VRAM grid
         drawBgPattern(p, sz, BgPattern::VramGrid);
         drawParticles(p, sz, Particles::Dots, rng);
         drawPost(p, sz, Post::Scanlines, rng);
         drawBottomBar(p, sz, BottomBar::Bgr555Bar);
         break;
-    case 2: // Блоки
+    case 2: // Blocks
         drawBgPattern(p, sz, BgPattern::Blocky);
         drawParticles(p, sz, Particles::Stars, rng);
         drawAccent(p, sz, Accent::RadialGlow);
         drawPost(p, sz, Post::Vignette, rng);
         drawBottomBar(p, sz, BottomBar::Watermark);
         break;
-    case 3: // Минимал
+    case 3: // Minimal
         drawBgPattern(p, sz, BgPattern::Plain);
         break;
     }
@@ -722,7 +727,7 @@ QImage renderPlaceholder(const QSize &sz, const QFont &baseFont,
     drawContent(p, sz, baseFont, title, subtitle);
     p.end();
 
-    // Рамка
+    // Frame
     if (style == 2)      applyRounded(img);
     else if (style == 3) drawCropMarks(img);
 
