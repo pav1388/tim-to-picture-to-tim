@@ -21,21 +21,6 @@ class QMenu;
 class QEvent;
 class LogWindow;
 
-class BatchWorker : public QObject {
-    Q_OBJECT
-public:
-    explicit BatchWorker(QObject *parent = nullptr) : QObject(parent) {}
-public slots:
-    void runExtract(const QString &folder, bool anyPal, bool autoAct, bool autoPal,
-                    bool autoGpl, bool saveAllPalettes, bool saveMeta, const QString &imageExt);
-    void runReplace(const QString &folder, const QString &currentSourcePath);
-signals:
-    void progress(int current, int total, const QString &fileName);
-    void logMsg(const QString &msg);
-    void finished(const QString &summary, const QStringList &errors,
-                  const QStringList &warnings, bool openedFileRewritten);
-};
-
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -51,7 +36,6 @@ protected:
 private slots:
     void openTim();
     void openRawTim();
-    void openTtptt();
     void saveTim();
     void saveTimAs();
     void saveTtptt();
@@ -90,8 +74,6 @@ private slots:
     void updateFlagsDisplay();
 
     void openPathFromCommandLine(const QString &path);
-    void registerFileAssociation(const QString &ext);
-    void unregisterFileAssociation(const QString &ext);
 
     void onBatchProgress(int current, int total, const QString &fileName);
     void onBatchLog(const QString &msg);

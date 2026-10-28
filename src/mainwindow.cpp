@@ -3,17 +3,16 @@
 // Copyright (C) 2026 pav13
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "mainwindow.h"
 #include "aboutdialog.h"
+#include "batchworker.h"
+#include "fileassoc.h"
 #include "logwindow.h"
+#include "mainwindow.h"
 #include "palettes.h"
 #include "placeholder.h"
 #include "themes.h"
 #include "timcodec.h"
-
-#ifdef Q_OS_WIN
-#  include <shlobj.h>
-#endif
+#include "timhelpers.h"
 
 #include <QAction>
 #include <QApplication>
@@ -65,464 +64,8 @@
 // #include <QSize>
 // #include <QStyle>
 
-#define TTPTT_PROJECT_VERSION 1
-
 static const QStringList kBppLabels = {"0 (4-bit)", "1 (8-bit)", "2 (16-bit)", "3 (24-bit)"};
 static const int kRecentLimit = 10;
-
-struct FileAssocInfo {
-    const char *ext;
-    const char *progId;
-    const char *friendly;
-    const char *contentType;
-    int         resourceId;
-    bool        isImage;
-};
-
-static const FileAssocInfo kFileAssocs[] = {
-    { ".tim",   "ttptt.tim",     "TIM (PlayStation Texture Image Map)",
-      "application/x-tim-image",     -101, true  },
-    { ".ttptt", "ttptt.project", "ttptt Project",
-      "application/x-ttptt-project", -102, false },
-};
-
-// =====================================================================
-// Helper: QMessageBox с русскими подписями стандартных кнопок
-// =====================================================================
-static QMessageBox::StandardButton showMsgBox(
-	QWidget *parent, QMessageBox::Icon icon,
-	const QString &title, const QString &text,
-	QMessageBox::StandardButtons buttons = QMessageBox::Ok,
-	QMessageBox::StandardButton defaultBtn = QMessageBox::NoButton)
-{
-	QMessageBox box(parent);
-	box.setIcon(icon);
-	box.setWindowTitle(title);
-	box.setText(text);
-	box.setStandardButtons(buttons);
-	if (defaultBtn != QMessageBox::NoButton) box.setDefaultButton(defaultBtn);
-
-	struct BtnLabel { QMessageBox::StandardButton b; const char *t; };
-	static const BtnLabel kLabels[] = {
-		{ QMessageBox::Ok,	  "OK" }, { QMessageBox::Yes,	 "Да" },
-		{ QMessageBox::No,	  "Нет" }, { QMessageBox::Save,	"Сохранить" },
-		{ QMessageBox::Discard, "Не сохранять" }, { QMessageBox::Cancel,  "Отмена" },
-		{ QMessageBox::Close,   "Закрыть" }, { QMessageBox::Abort,   "Прервать" },
-		{ QMessageBox::Retry,   "Повторить" }, { QMessageBox::Ignore,  "Пропустить" },
-	};
-	for (const auto &l : kLabels)
-		if (auto *b = box.button(l.b)) b->setText(QString::fromUtf8(l.t));
-
-	return static_cast<QMessageBox::StandardButton>(box.exec());
-}
-
-static bool parseFlexible(const QString &sIn, int *out, QString *err = nullptr) {
-	QString s = sIn.trimmed();
-	if (s.isEmpty()) { if (err) *err = "Пустое значение"; return false; }
-	bool ok = false;
-	int v = s.toInt(&ok, 0);
-	if (!ok) { if (err) *err = "Не число: " + sIn; return false; }
-	*out = v;
-	return true;
-}
-
-// STP-детекция для 16bpp (BMP не хранит альфу)
-static bool imageHasStpPixels(const Tim::Image &im, int bpp) {
-	if (bpp != 2) return false;
-	const QByteArray &d = im.data;
-	const uchar *p = reinterpret_cast<const uchar*>(d.constData());
-	int n = d.size() / 2;
-	for (int i = 0; i < n; ++i)
-		if (Tim::rd16(p + i * 2) & 0x8000) return true;
-	return false;
-}
-
-static bool groupHasAnyStp(const Tim::Group &g) {
-	if (g.bpp != 2) return false;
-	for (const auto &im : g.images)
-		if (imageHasStpPixels(im, g.bpp)) return true;
-	return false;
-}
-
-static bool needsMultiPalSuffix(const Tim::Group &g, bool enabled) {
-    if (!enabled) return false;
-    if (g.bpp != 0 && g.bpp != 1) return false;
-    if (!g.hasClut || g.clutHeader.height <= 1) return false;
-    return true;
-}
-
-// Запись метаданных .ttptt
-static bool writeTtpttFile(const QString &path, const QVector<Tim::Group> &groups,
-						   const QString &sourcePath = QString(),
-						   int paletteRow = 0, int currentEntry = 0,
-						   bool showStp = false) {
-	if (groups.isEmpty()) return false;
-
-	QJsonObject root;
-	root["version"] = TTPTT_PROJECT_VERSION;
-	root["app"] = "ttptt";
-	if (!sourcePath.isEmpty())
-		root["sourcePath"] = sourcePath;
-	root["paletteRow"]   = paletteRow;
-	root["currentEntry"] = currentEntry;
-	root["showStp"]	  = showStp;
-
-	QJsonArray garr;
-	for (const Tim::Group &g : groups)
-		garr.append(Tim::groupToJson(g));
-	root["groups"] = garr;
-
-	QJsonDocument doc(root);
-	QFile f(path);
-	if (!f.open(QIODevice::WriteOnly)) return false;
-	f.write(doc.toJson(QJsonDocument::Indented));
-	f.close();
-	return true;
-}
-
-// Ищет файл изображения в каталоге проекта.
-static QString findTimImage(const QString &dirPath, const QString &stem,
-                            int globalIdx, bool singleImage,
-                            int paletteRow)
-{
-    QDir dir(dirPath);
-    QStringList candidates;
-
-    // Вспомогательная: кандидаты <base>_palNN.{png,bmp}
-    auto addPalCandidates = [&](const QString &base) {
-        if (paletteRow < 0) return;
-        candidates << QString("%1_pal%2.png").arg(base)
-                          .arg(paletteRow + 1, 2, 10, QChar('0'));
-        candidates << QString("%1_pal%2.bmp").arg(base)
-                          .arg(paletteRow + 1, 2, 10, QChar('0'));
-        // 1-значный fallback (pal1, pal2) — на случай ручного переименования
-        candidates << QString("%1_pal%2.png").arg(base).arg(paletteRow + 1);
-        candidates << QString("%1_pal%2.bmp").arg(base).arg(paletteRow + 1);
-    };
-
-    if (singleImage) {
-        addPalCandidates(stem);           // hero_palNN.{png,bmp}
-        candidates << (stem + ".png");    // hero.png
-        candidates << (stem + ".bmp");
-    }
-
-    // Много изображений: <stem>_imgNN[_palNN].{png,bmp}
-    addPalCandidates(QString("%1_img%2").arg(stem).arg(globalIdx, 2, 10, QChar('0')));
-    addPalCandidates(QString("%1_img%2").arg(stem).arg(globalIdx));
-    candidates << QString("%1_img%2.png").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
-    candidates << QString("%1_img%2.bmp").arg(stem).arg(globalIdx, 2, 10, QChar('0'));
-    candidates << QString("%1_img%2.png").arg(stem).arg(globalIdx);
-    candidates << QString("%1_img%2.bmp").arg(stem).arg(globalIdx);
-
-    for (const QString &cand : candidates) {
-        const QString full = dir.filePath(cand);
-        if (QFileInfo::exists(full)) return full;
-    }
-    return QString();
-}
-
-// =====================================================================
-// Параметры пакетного извлечения
-// =====================================================================
-struct BatchParams {
-    bool    saveAct         = false;
-    bool    savePal         = false;
-    bool    saveGpl         = false;
-    bool    saveTtptt       = false;
-    bool    saveAllPalettes = false;
-    QString imageFormat     = "png";   // "png" | "bmp"
-};
-
-static bool showBatchParamsDialog(QWidget *parent, BatchParams &params) {
-    QDialog dlg(parent);
-    dlg.setWindowTitle(QObject::tr("Параметры пакетного извлечения"));
-    dlg.setWindowFlags(dlg.windowFlags() & ~Qt::WindowContextHelpButtonHint);
-
-    auto *layout = new QVBoxLayout(&dlg);
-
-    auto *gImg = new QGroupBox(QObject::tr("Изображения"), &dlg);
-    auto *il   = new QVBoxLayout(gImg);
-    auto *fh   = new QHBoxLayout();
-    fh->addWidget(new QLabel(QObject::tr("Формат:"), gImg));
-    auto *cbFormat = new QComboBox(gImg);
-    cbFormat->addItem("PNG (*.png)", "png");
-    cbFormat->addItem("BMP (*.bmp)", "bmp");
-    cbFormat->setCurrentIndex(params.imageFormat == "bmp" ? 1 : 0);
-    fh->addWidget(cbFormat, 1);
-    il->addLayout(fh);
-    auto *cbAllPal = new QCheckBox(QObject::tr("Сохранять все изображения в каждой палитре"), gImg);
-    cbAllPal->setChecked(params.saveAllPalettes);
-    il->addWidget(cbAllPal);
-    layout->addWidget(gImg);
-
-    auto *gPal = new QGroupBox(QObject::tr("Палитры рядом с изображением"), &dlg);
-    auto *pl   = new QVBoxLayout(gPal);
-	auto *cbAct = new QCheckBox(QObject::tr("ACT - Adobe Color Table (.act)"), gPal);
-	auto *cbPal = new QCheckBox(QObject::tr("PAL - JASC Palette (.pal)"), gPal);
-	auto *cbGpl = new QCheckBox(QObject::tr("GPL - GIMP Palette (.gpl)"), gPal);
-	cbAct->setChecked(params.saveAct);
-	cbPal->setChecked(params.savePal);
-	cbGpl->setChecked(params.saveGpl);
-    pl->addWidget(cbAct); pl->addWidget(cbPal); pl->addWidget(cbGpl);
-    layout->addWidget(gPal);
-
-    auto *gMeta = new QGroupBox(QObject::tr("Метаданные"), &dlg);
-    auto *ml    = new QVBoxLayout(gMeta);
-    auto *cbTtptt = new QCheckBox(QObject::tr("Сохранять .ttptt рядом с изображением"), gMeta);
-    cbTtptt->setChecked(params.saveTtptt);
-    ml->addWidget(cbTtptt);
-    layout->addWidget(gMeta);
-
-    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-    if (auto *b = bb->button(QDialogButtonBox::Ok))     b->setText(QObject::tr("OK"));
-    if (auto *b = bb->button(QDialogButtonBox::Cancel)) b->setText(QObject::tr("Отмена"));
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    layout->addWidget(bb);
-
-    if (dlg.exec() != QDialog::Accepted) return false;
-
-    params.imageFormat     = cbFormat->currentData().toString();
-    params.saveAllPalettes = cbAllPal->isChecked();
-    params.saveAct         = cbAct->isChecked();
-    params.savePal         = cbPal->isChecked();
-    params.saveGpl         = cbGpl->isChecked();
-    params.saveTtptt       = cbTtptt->isChecked();
-    return true;
-}
-
-// =====================================================================
-// Batch Worker Implementation
-// =====================================================================
-static QStringList autoSavePalettesHelper(const Tim::Group &g, const QString &baseNoext, bool act, bool pal, bool gpl) {
-	QStringList saved;
-	int cw = 0, ch = 0;
-	QVector<QColor> flat = Tim::safeClutFlat(g, &cw, &ch);
-	if (flat.isEmpty()) return saved;
-	QString err;
-	if (act && Palettes::saveAny(baseNoext + ".act", flat, cw, ch, &err)) saved << ".act";
-	if (pal && Palettes::saveAny(baseNoext + ".pal", flat, cw, ch, &err)) saved << ".pal";
-	if (gpl && Palettes::saveAny(baseNoext + ".gpl", flat, cw, ch, &err)) saved << ".gpl";
-	return saved;
-}
-
-void BatchWorker::runExtract(const QString &folder, bool anyPal, bool autoAct,
-							 bool autoPal, bool autoGpl, bool saveAllPalettes,
-							 bool saveMeta, const QString &imageExt) {
-	QDir dir(folder);
-	QStringList files = dir.entryList(QDir::Files);
-	files.sort();
-	int count = 0, timFiles = 0, skipped = 0, metaSaved = 0;
-	int stpAffected = 0;
-	QStringList errors;
-	QStringList metaErrors;
-	const QString ext = imageExt.startsWith('.') ? imageExt : ("." + imageExt);
-	const bool bmpOutput = (ext.compare(".bmp", Qt::CaseInsensitive) == 0);
-
-	for (int idx = 0; idx < files.size(); ++idx) {
-		const QString &fname = files[idx];
-		emit progress(idx + 1, files.size(), fname);
-		QFile f(dir.filePath(fname));
-		if (!f.open(QIODevice::ReadOnly)) {
-			errors << fname + ": cannot open";
-			continue;
-		}
-		QByteArray data = f.readAll();
-		f.close();
-
-		if (data.indexOf(QByteArray("\x10\x00\x00\x00", 4)) < 0) {
-			++skipped;
-			continue;
-		}
-		QVector<Tim::Group> groups = Tim::parseAll(data);
-		if (groups.isEmpty()) {
-			++skipped;
-			continue;
-		}
-		++timFiles;
-
-		QString stem = QFileInfo(fname).completeBaseName();
-		if (stem.isEmpty()) stem = fname;
-
-		if (saveMeta) {
-			QString metaPath = dir.filePath(stem + ".ttptt");
-			if (writeTtpttFile(metaPath, groups, dir.filePath(fname), 0, 0, false))
-				++metaSaved;
-			else
-				metaErrors << fname + ": метаданные не сохранены";
-		}
-
-		int n = 0;
-		for (const Tim::Group &g : groups) {
-			for (const QString &w : g.warnings) emit logMsg(fname + ": " + w);
-
-			if (bmpOutput && groupHasAnyStp(g)) {
-				++stpAffected;
-				emit logMsg(fname + ": !!! ВНИМАНИЕ: BMP потеряет STP-биты в 16bpp-группе");
-			}
-
-			for (int i = 0; i < g.images.size(); ++i) {
-				++n;
-				const QString basePrefix =
-					QString("%1_img%2").arg(stem).arg(n, 2, 10, QChar('0'));
-
-				const bool multiPal = saveAllPalettes &&
-									  (g.bpp == 0 || g.bpp == 1) &&
-									  g.hasClut && g.clutHeader.height > 1;
-				const int ch = qMax<int>(1, g.clutHeader.height);
-
-				if (multiPal) {
-					for (int r = 0; r < ch; ++r) {
-						QImage pimg = Tim::decodeImage(g, i, r, -1);
-						if (pimg.isNull()) {
-							errors << QString("%1 pal#%2: null image")
-										  .arg(basePrefix).arg(r + 1);
-							continue;
-						}
-						const QString ppath = dir.filePath(
-							QString("%1_pal%2%3").arg(basePrefix)
-								.arg(r + 1, 2, 10, QChar('0')).arg(ext));
-						if (!pimg.save(ppath)) {
-							errors << ppath + ": save failed";
-							continue;
-						}
-						++count;
-					}
-				} else {
-					const QString imgPath = dir.filePath(basePrefix + ext);
-					QImage img = Tim::decodeImage(g, i, 0, -1);
-					if (img.isNull()) {
-						errors << imgPath + ": null image";
-						continue;
-					}
-					if (!img.save(imgPath)) {
-						errors << imgPath + ": save failed";
-						continue;
-					}
-					++count;
-				}
-
-				if (anyPal) {
-					autoSavePalettesHelper(g, dir.filePath(basePrefix),
-										   autoAct, autoPal, autoGpl);
-				}
-			}
-		}
-	}
-
-	QString msg = QString("Экспортировано %1 файлов (%2) из %3 TIM-файлов "
-						  "(пропущено не-TIM: %4).")
-		.arg(count).arg(ext).arg(timFiles).arg(skipped);
-	if (saveMeta)
-		msg += QString(" Метаданных: %1.").arg(metaSaved);
-	if (stpAffected > 0) {
-		msg += QString("\n\nВНИМАНИЕ: в %1 '16bpp-группе(ах)' были STP-пиксели. "
-					   "BMP не хранит альфа-канал — при обратном конвертировании "
-					   "STP-биты будут сброшены. Используйте PNG."
-					   "Подробнее в Журнал логов (меню Разное)")
-			.arg(stpAffected);
-	}
-	if (!metaErrors.isEmpty())
-		errors.append(metaErrors);
-	emit finished(msg, errors, QStringList(), false);
-}
-
-void BatchWorker::runReplace(const QString &folder, const QString &currentSourcePath) {
-	QDir dir(folder);
-	QStringList files = dir.entryList(QDir::Files);
-	files.sort();
-	int replaced = 0, missing = 0, timFiles = 0, changedFiles = 0;
-	int stpLossCount = 0, skipped = 0, normalized = 0;
-	QStringList errors;
-	QStringList sizeMismatches;
-	bool openedFileRewritten = false;
-
-	for (int idx = 0; idx < files.size(); ++idx) {
-		const QString &fname = files[idx];
-		emit progress(idx + 1, files.size(), fname);
-		const QString path = dir.filePath(fname);
-		QFile f(path);
-		if (!f.open(QIODevice::ReadOnly)) { errors << fname + ": cannot open"; continue; }
-		QByteArray data = f.readAll();
-		f.close();
-		if (data.indexOf(QByteArray("\x10\x00\x00\x00", 4)) < 0) { ++skipped; continue; }
-		QVector<Tim::Group> groups = Tim::parseAll(data);
-		if (groups.isEmpty()) { ++skipped; continue; }
-		++timFiles;
-
-		QString stem = QFileInfo(fname).completeBaseName();
-		if (stem.isEmpty()) stem = fname;
-
-		int n = 0;
-		bool changed = false;
-		for (Tim::Group &g : groups) {
-			for (int i = 0; i < g.images.size(); ++i) {
-				++n;
-				const int w = Tim::widthWordsToPixels(g.bpp, g.images[i].header.widthWords);
-				const int h = g.images[i].header.height;
-
-				const QString imagePath = findTimImage(dir.path(), stem, n, false, -1);
-				if (imagePath.isEmpty()) { ++missing; continue; }
-				const QString imgName = QFileInfo(imagePath).fileName();
-
-				QImage im(imagePath);
-				if (im.isNull()) {
-					errors << imgName + " -> " + fname + ": open failed";
-					continue;
-				}
-				const bool bmpLossy = imgName.endsWith(".bmp", Qt::CaseInsensitive) &&
-									  g.bpp == 2 &&
-									  imageHasStpPixels(g.images[i], g.bpp);
-				if (bmpLossy) {
-					emit logMsg(QString("%1 -> %2: BMP стирает STP-биты в 16bpp")
-									.arg(imgName, fname));
-					++stpLossCount;
-				}
-				if (im.width() != w || im.height() != h) {
-					sizeMismatches << QString("%1 -> %2: image %3x%4, TIM %5x%6")
-						.arg(imgName, fname)
-						.arg(im.width()).arg(im.height()).arg(w).arg(h);
-				}
-				im = Tim::normalizeImageForTim(im, w, h);
-				if (!Tim::applyEncodedToImage(g, i, im, 0)) {
-					errors << imgName + " -> " + fname + ": encode failed";
-					continue;
-				}
-				changed = true;
-				++replaced;
-			}
-		}
-		if (!changed) continue;
-
-		QByteArray newBytes = Tim::rebuildAll(groups);
-		if (newBytes.size() != data.size()) {
-			++normalized;
-			emit logMsg(QString("%1: !!! ВНИМАНИЕ: нормализован %2 -> %3")
-				.arg(fname).arg(data.size()).arg(newBytes.size()));
-		}
-		QFile out(path);
-		if (!out.open(QIODevice::WriteOnly)) {
-			errors << "write " + fname + ": cannot open";
-			continue;
-		}
-		out.write(newBytes);
-		out.close();
-		++changedFiles;
-		if (!currentSourcePath.isEmpty() &&
-			QFileInfo(path).absoluteFilePath() == QFileInfo(currentSourcePath).absoluteFilePath()) {
-			openedFileRewritten = true;
-		}
-	}
-
-	QString msg = QString("Изменено %1 TIM-файлов, заменено %2 изображений "
-						  "(пропущено не-TIM: %3, не найдено изображений: %4, нормализовано: %5).")
-		.arg(changedFiles).arg(replaced).arg(skipped).arg(missing).arg(normalized);
-	if (stpLossCount > 0) {
-		msg += QString("\n\nВНИМАНИЕ: в %1 файле(ах) BMP-замена стёрла STP-биты "
-					   "в 16bpp-группах. Используйте PNG.").arg(stpLossCount);
-	}
-	emit finished(msg, errors, sizeMismatches, openedFileRewritten);
-}
 
 // =====================================================================
 // MainWindow Implementation
@@ -759,10 +302,22 @@ void MainWindow::buildMenus() {
     m_logAction->setCheckable(true);
     m_logAction->setChecked(m_logWindow && m_logWindow->isVisible());	
     sm->addSeparator();
-    sm->addAction(tr("Ассоциация .tim с программой"), this, [this]() { registerFileAssociation(".tim"); });
-    sm->addAction(tr("Ассоциация .ttptt с программой"), this, [this]() { registerFileAssociation(".ttptt"); });
-    sm->addAction(tr("Снять ассоциацию .tim"), this, [this]() { unregisterFileAssociation(".tim"); });
-    sm->addAction(tr("Снять ассоциацию .ttptt"), this, [this]() { unregisterFileAssociation(".ttptt"); });
+	sm->addAction(tr("Ассоциация .tim с программой"), this, [this]() {
+		if (blockedByBatch()) return;
+		FileAssoc::registerFileAssociation(".tim", this);
+	});
+	sm->addAction(tr("Ассоциация .ttptt с программой"), this, [this]() {
+		if (blockedByBatch()) return;
+		FileAssoc::registerFileAssociation(".ttptt", this);
+	});
+	sm->addAction(tr("Снять ассоциацию .tim"), this, [this]() {
+		if (blockedByBatch()) return;
+		FileAssoc::unregisterFileAssociation(".tim", this);
+	});
+	sm->addAction(tr("Снять ассоциацию .ttptt"), this, [this]() {
+		if (blockedByBatch()) return;
+		FileAssoc::unregisterFileAssociation(".ttptt", this);
+	});
     sm->addSeparator();
 
 	m_autoSaveTtpttAction = sm->addAction(tr("Сохранять метаданные .ttptt рядом с изображением"));
@@ -1473,14 +1028,8 @@ void MainWindow::saveAllImages() {
     showMsgBox(this, QMessageBox::Information, tr("Готово"), msg);
     setStatus(msg.split('\n').first());
     qInfo() << msg;
-}
-
-void MainWindow::openTtptt() {
-	if (blockedByBatch()) return;
-	QString p = QFileDialog::getOpenFileName(this, "Метаданные ttptt", initialDir(),
-		"Метаданные ttptt (*.ttptt);;All (*.*)");
-	if (p.isEmpty()) return;
-	loadTtpttFromPath(p);
+	m_dirty = false; 
+	updateTitle();
 }
 
 bool MainWindow::writeTtpttToPath(const QString &path) {
@@ -1508,6 +1057,8 @@ void MainWindow::saveTtptt() {
 	}
 	if (path.isEmpty()) { saveTtpttAs(); return; }
 	writeTtpttToPath(path);
+	m_dirty = false; 
+	updateTitle();
 }
 
 void MainWindow::saveTtpttAs() {
@@ -1554,12 +1105,12 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 		return false;
 	}
 	
-	int versionTtptt = root["versionTtptt"].toInt(0);
-	if (versionTtptt < 1 || versionTtptt > TTPTT_PROJECT_VERSION) {
-		qWarning() << "Парсер .ttptt: неизвестная версия метаданных - " << versionTtptt;
+	int version = root["version"].toInt();
+	if (version < 1 || version > TTPTT_PROJECT_VERSION) {
+		qWarning() << "Парсер .ttptt: неизвестная версия метаданных - " << version;
 	}
-	if (versionTtptt < TTPTT_PROJECT_VERSION) {
-		qWarning() << "Парсер .ttptt: старая версия метаданных, возможны ошибки - " << versionTtptt;
+	if (version < TTPTT_PROJECT_VERSION) {
+		qWarning() << "Парсер .ttptt: старая версия метаданных, возможны ошибки - " << version;
 	}
 
 	QVector<Tim::Group> groups;
@@ -2100,16 +1651,16 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
     if (QFileInfo(path).suffix().toLower() == "bmp" &&
         g->bpp == 2 && imageHasStpPixels(g->images[ii], g->bpp)) {
         if (showMsgBox(this, QMessageBox::Warning, tr("BMP и STP"),
-            tr("В текущем 16bpp-изображении есть STP-пиксели (полупрозрачность).\n"
+            tr("В текущем 16bpp-изображении есть STP-пиксели.\n"
                "BMP не хранит альфа-канал — STP-биты будут сброшены.\n\nПродолжить?"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
             return false;
     }
 
     const int bpp = g->bpp;
-    auto &h = g->images[ii].header;
-    const int oldWW = h.widthWords;
-    const int oldH  = h.height;
+    const Tim::BlockHeader oldHeader = g->images[ii].header;
+    const int oldWW = oldHeader.widthWords;
+    const int oldH  = oldHeader.height;
     const int oldW  = Tim::widthWordsToPixels(bpp, oldWW);
 
     const int newWW    = Tim::pixelsToWords(bpp, img.width());
@@ -2128,17 +1679,12 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
             .arg(img.width()).arg(img.height())
             .arg(oldWW).arg(oldH).arg(oldW).arg(oldH)
             .arg(newWW).arg(newH).arg(actualW).arg(newH);
-
-        if (padNeeded) {
-            msg += QString("\n\nШирина будет дополнена прозрачными пикселями "
-                           "до %1 px (%2bpp, выравнивание по 16-битному слову).")
-                .arg(actualW).arg(bpp * 8);
-        }
+        if (padNeeded)
+            msg += QString("\n\nШирина будет дополнена прозрачными пикселями до %1 px.")
+                .arg(actualW);
         if (showMsgBox(this, QMessageBox::Question, "Замена изображения", msg,
-                       QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) {
-            qInfo() << "Замена изображения отменена пользователем";
+                       QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes)
             return false;
-        }
     }
 
     if (img.width() != actualW || img.height() != newH) {
@@ -2150,12 +1696,23 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
         img = padded;
     }
 
-    h.widthWords = quint16(newWW);
-    h.height     = quint16(newH);
+    Tim::BlockHeader newHeader = oldHeader;
+    newHeader.widthWords = quint16(newWW);
+    newHeader.height     = quint16(newH);
+    newHeader.size       = 12;
 
-    if (!Tim::applyEncodedToImage(*g, ii, img, m_paletteRow)) return false;
+    QByteArray newData = Tim::encodeImage(img, *g, newHeader, m_paletteRow);
+    if (newData.isEmpty()) {
+        qWarning() << "replaceImage: encodeImage failed for" << path
+                   << "bpp=" << bpp << "size=" << actualW << "x" << newH;
+        setStatus(tr("Не удалось закодировать изображение — изменения отменены"));
+        return false;
+    }
+    newHeader.size = 12 + newData.size();
 
-    const int newDataSize = g->images[ii].data.size();
+    g->images[ii].header = newHeader;
+    g->images[ii].data   = newData;
+
     rememberDir(path);
     rebuildAndReparse(true);
     m_dirty = true;
@@ -2163,7 +1720,7 @@ bool MainWindow::replaceImageFromPath(const QString &path) {
 
     qInfo() << QString("Изображение заменено: %1x%2 → %3x%4 (ww=%5, h=%6, %7 байт)")
         .arg(oldW).arg(oldH).arg(actualW).arg(newH).arg(newWW).arg(newH)
-        .arg(newDataSize);
+        .arg(newData.size());
     setStatus(QString("Изображение заменено: %1x%2 (было %3x%4)")
         .arg(actualW).arg(newH).arg(oldW).arg(oldH));
     return true;
@@ -2186,7 +1743,6 @@ void MainWindow::batchExtract() {
         return;
     }
 
-    // Параметры текущего запуска: дефолт = last-used из конфига
     BatchParams p;
     p.saveAct         = m_batchSaveAct;
     p.savePal         = m_batchSavePal;
@@ -2197,7 +1753,6 @@ void MainWindow::batchExtract() {
 
     if (!showBatchParamsDialog(this, p)) return;
 
-    // Запоминаем как «последние использованные»
     m_batchSaveAct         = p.saveAct;
     m_batchSavePal         = p.savePal;
     m_batchSaveGpl         = p.saveGpl;
@@ -2712,111 +2267,4 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
 		return false;
 	}
 	return QMainWindow::eventFilter(obj, ev);
-}
-
-void MainWindow::registerFileAssociation(const QString &extIn) {
-	if (blockedByBatch()) return;
-#ifdef Q_OS_WIN
-	const QString ext = extIn.startsWith('.') ? extIn : ('.' + extIn);
-
-	const FileAssocInfo *a = nullptr;
-	for (const auto &entry : kFileAssocs) {
-		if (QString::fromLatin1(entry.ext).compare(ext, Qt::CaseInsensitive) == 0) {
-			a = &entry;
-			break;
-		}
-	}
-	if (!a) {
-		showMsgBox(this, QMessageBox::Warning, tr("Ассоциация"),
-				   tr("Неподдерживаемое расширение: %1").arg(ext));
-		return;
-	}
-
-	const QString exePath = QDir::toNativeSeparators(
-		QCoreApplication::applicationFilePath());
-	const QString prog = QString::fromLatin1(a->progId);
-
-	QSettings reg("HKEY_CURRENT_USER\\Software\\Classes", QSettings::NativeFormat);
-	reg.setValue(ext + "/Default", prog);
-	reg.setValue(ext + "/Content Type", QString::fromLatin1(a->contentType));
-	if (a->isImage)
-		reg.setValue(ext + "/PerceivedType", "image");
-
-	reg.setValue(prog + "/Default", QString::fromLatin1(a->friendly));
-	reg.setValue(prog + "/DefaultIcon/Default",
-				 "\"" + exePath + "\"," + QString::number(a->resourceId));
-	reg.setValue(prog + "/shell/open/Default",			  "Открыть в ttptt");
-	reg.setValue(prog + "/shell/open/command/Default",
-				 "\"" + exePath + "\" \"%1\"");
-	reg.sync();
-	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-
-	showMsgBox(this, QMessageBox::Information, tr("Ассоциация"),
-			   tr("Файлы %1 связаны с ttptt.\n\n"
-				  "Двойной клик по %1 в Проводнике открывает ttptt.\n"
-				  "Чтобы назначить ttptt программой по умолчанию — "
-				  "ПКМ по файлу -> «Открыть с помощью» -> "
-				  "«Выбрать другое приложение».").arg(ext));
-	qInfo() << "Зарегистрирована ассоциация" << ext << "->" << exePath;
-#else
-	Q_UNUSED(extIn);
-	showMsgBox(this, QMessageBox::Information, tr("Ассоциация"),
-			   tr("Ассоциация файлов реализована только для Windows."));
-#endif
-}
-
-void MainWindow::unregisterFileAssociation(const QString &extIn) {
-	if (blockedByBatch()) return;
-#ifdef Q_OS_WIN
-	const QString ext = extIn.startsWith('.') ? extIn : ('.' + extIn);
-
-	const FileAssocInfo *a = nullptr;
-	for (const auto &entry : kFileAssocs) {
-		if (QString::fromLatin1(entry.ext).compare(ext, Qt::CaseInsensitive) == 0) {
-			a = &entry;
-			break;
-		}
-	}
-	if (!a) return;
-
-	const QString prog = QString::fromLatin1(a->progId);
-
-	{
-		QSettings reg("HKEY_CURRENT_USER\\Software\\Classes", QSettings::NativeFormat);
-		reg.remove(ext + "/OpenWithProgids/" + prog);
-		reg.remove(ext + "/Default");
-		reg.remove(ext + "/Content Type");
-		if (a->isImage)
-			reg.remove(ext + "/PerceivedType");
-		reg.remove(prog);
-
-		reg.beginGroup(ext + "/OpenWithProgids");
-		const QStringList leftovers = reg.childKeys();
-		reg.endGroup();
-		if (leftovers.isEmpty())
-			reg.remove(ext + "/OpenWithProgids");
-		reg.sync();
-	}
-	{
-		QSettings fx("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows"
-					 "\\CurrentVersion\\Explorer\\FileExts\\" + ext,
-					 QSettings::NativeFormat);
-		fx.remove("UserChoice");
-		fx.remove("OpenWithList");
-		fx.remove("OpenWithProgids");
-		fx.sync();
-	}
-	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-
-	showMsgBox(this, QMessageBox::Information, tr("Ассоциация"),
-			   tr("Ассоциация %1 с ttptt снята (для текущего пользователя).\n\n"
-				  "Если Проводник ещё показывает старую иконку или продолжает "
-				  "открывать файлы в ttptt — нажмите F5 в окне Проводника "
-				  "или перезапустите его.").arg(ext));
-	qInfo() << "Снята ассоциация" << ext;
-#else
-	Q_UNUSED(extIn);
-	showMsgBox(this, QMessageBox::Information, tr("Ассоциация"),
-			   tr("Ассоциация файлов реализована только для Windows."));
-#endif
 }

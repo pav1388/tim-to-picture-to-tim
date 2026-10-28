@@ -183,13 +183,12 @@ QImage decodeImage(const Group &g, int imageIdx, int paletteRow, int alphaStp) {
 		QImage img(width, height, QImage::Format_ARGB32);
 		
 		int availPx = data.size() / 2;
-		const quint16 *src = reinterpret_cast<const quint16*>(data.constData());
-		
+		const uchar *srcBytes = reinterpret_cast<const uchar*>(data.constData());
 		for (int y = 0; y < height; ++y) {
 			QRgb *line = reinterpret_cast<QRgb*>(img.scanLine(y));
 			for (int x = 0; x < width; ++x) {
 				int pxIdx = y * width + x;
-				quint16 c = (pxIdx < availPx) ? src[pxIdx] : 0;
+				quint16 c = (pxIdx < availPx) ? rd16(srcBytes + pxIdx * 2) : 0;
 				int r = c & 0x1F, gg = (c >> 5) & 0x1F, b = (c >> 10) & 0x1F;
 				int a = (useStp && (c & 0x8000)) ? 128 : 255;
 				line[x] = qRgba((r << 3) | (r >> 2), (gg << 3) | (gg >> 2), (b << 3) | (b >> 2), a);
@@ -323,16 +322,15 @@ QByteArray encodeImage(const QImage &imgIn, const Group &g,
 	// ----- 16bpp -----
 	if (bpp == 2) {
 		QImage rgba = img.convertToFormat(QImage::Format_ARGB32);
-		int nPx = width * height;
-		QByteArray out(nPx * 2, '\0');
-		quint16 *dst = reinterpret_cast<quint16*>(out.data());
-		
+		QByteArray out(width * height * 2, '\0');
+		uchar *dstBytes = reinterpret_cast<uchar*>(out.data());
 		for (int y = 0; y < height; ++y) {
 			const QRgb *line = reinterpret_cast<const QRgb*>(rgba.constScanLine(y));
 			for (int x = 0; x < width; ++x) {
 				QRgb c = line[x];
 				int stp = (qAlpha(c) < 255) ? 1 : 0;
-				dst[y * width + x] = rgbToBgr555(qRed(c), qGreen(c), qBlue(c), stp);
+				wr16(dstBytes + (y * width + x) * 2,
+					 rgbToBgr555(qRed(c), qGreen(c), qBlue(c), stp));
 			}
 		}
 		return out;
