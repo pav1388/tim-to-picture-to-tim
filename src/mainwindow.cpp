@@ -67,20 +67,21 @@
 
 static const QStringList kBppLabels = {"0 (4-bit)", "1 (8-bit)", "2 (16-bit)", "3 (24-bit)"};
 static const int kRecentLimit = 10;
+
 struct FileAssocInfo {
-	const char *ext;
-	const char *progId;
-	const char *friendly;
-	const char *contentType;
-	int         iconIndex;
-	bool		isImage;
+    const char *ext;
+    const char *progId;
+    const char *friendly;
+    const char *contentType;
+    int         resourceId;
+    bool        isImage;
 };
 
 static const FileAssocInfo kFileAssocs[] = {
     { ".tim",   "ttptt.tim",     "TIM (PlayStation Texture Image Map)",
-      "application/x-tim-image", 1, true  },
+      "application/x-tim-image",     -101, true  },
     { ".ttptt", "ttptt.project", "ttptt Project",
-      "application/x-ttptt-project", 0, false },
+      "application/x-ttptt-project", -102, false },
 };
 
 // =====================================================================
@@ -2600,7 +2601,7 @@ void MainWindow::registerFileAssociation(const QString &extIn) {
 
 	reg.setValue(prog + "/Default", QString::fromLatin1(a->friendly));
 	reg.setValue(prog + "/DefaultIcon/Default",
-             "\"" + exePath + "\"," + QString::number(a->iconIndex));
+				 "\"" + exePath + "\"," + QString::number(a->resourceId));
 	reg.setValue(prog + "/shell/open/Default",			  "Открыть в ttptt");
 	reg.setValue(prog + "/shell/open/command/Default",
 				 "\"" + exePath + "\" \"%1\"");

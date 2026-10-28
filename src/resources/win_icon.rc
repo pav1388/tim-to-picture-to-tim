@@ -1,2 +1,6 @@
+// win_icon.rc
+#define IDI_ICON1 101
+#define IDI_ICON2 102
+
 IDI_ICON1 ICON "icon.ico"
-IDI_ICON2 ICON "icon-tim.ico"
+IDI_ICON2 ICON "icon-ttptt.ico"
