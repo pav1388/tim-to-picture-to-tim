@@ -132,7 +132,7 @@ set(TTPTT_SOURCES
 )
 
 if(WIN32)
-    list(APPEND TTPTT_SOURCES "${TTPTT_SRC_DIR}/resources/win_icon.rc")
+    list(APPEND TTPTT_SOURCES "${TTPTT_SRC_DIR}/resources/win_app.rc")
     add_executable(ttptt WIN32 ${TTPTT_SOURCES})
 else()
     add_executable(ttptt ${TTPTT_SOURCES})

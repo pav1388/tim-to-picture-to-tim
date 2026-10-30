@@ -3,10 +3,9 @@ setlocal
 
 cd /d "%~dp0"
 
-REM Absolute paths: %~dp0 ends with a backslash; %%~fi normalizes ".."
 for %%i in ("%~dp0..") do set PROJECT_ROOT=%%~fi
 set BUILD_DIR=%PROJECT_ROOT%\build
-set QT_DIR=%PROJECT_ROOT%\qt-5.6.3-static
+set QT_DIR=%PROJECT_ROOT%\../_libs\qt-5.6.3-static
 set EXE_OUT=%PROJECT_ROOT%\ttptt.exe
 
 REM --- sanity checks ---

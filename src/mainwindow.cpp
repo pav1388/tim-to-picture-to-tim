@@ -1142,7 +1142,7 @@ bool MainWindow::loadTtpttFromPath(const QString &path, bool silent) {
 		return false;
 	}
 	
-	int version = root["version"].toInt();
+	int version = root["version"].toInt(0);
 	if (version < 1 || version > TTPTT_PROJECT_VERSION) {
 		qWarning() << "ttptt parser: unknown metadata version -" << version;
 	}
