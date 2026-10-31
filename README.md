@@ -6,6 +6,10 @@
 
 Разработка: часть кода подготовлена с помощью ИИ-ассистента (DeepSeek).
 
+GitHub: https://github.com/pav1388/tim-to-picture-to-tim
+
+Форум: https://www.emu-land.net/forum/index.php/topic,93455.0.html
+
 ## Скриншоты
 
 <p align="center">
