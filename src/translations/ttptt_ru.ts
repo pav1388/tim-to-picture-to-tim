@@ -1270,16 +1270,19 @@ BMP не хранит альфа-канал — STP-биты будут сбро
 <context>
     <name>aboutdialog</name>
     <message>
-        <location filename="../aboutdialog.cpp" line="+25"/>
-        <source>ttptt: tim-to-picture-to-tim by pav13(+DeepSeek), 2026
-TIM &lt;-&gt; Picture converter for PlayStation 1.
-https://github.com/pav1388/tim-to-picture-to-tim</source>
-        <translation>ttptt: tim-to-picture-to-tim by pav13(+DeepSeek), 2026
-Конвертер TIM &lt;-&gt; Изображение для PlayStation 1.
-https://github.com/pav1388/tim-to-picture-to-tim</translation>
+        <location filename="../aboutdialog.cpp" line="+32"/>
+        <source>TIM &lt;-&gt; Picture converter for PlayStation 1.
+License: GPL-3.0-or-later</source>
+        <translation>Конвертер TIM &lt;-&gt; Изображение для PlayStation 1.
+Лицензия: GPL-3.0-or-later</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="-4"/>
+        <source>ttptt: tim-to-picture-to-tim by pav13, 2026</source>
+        <translation>ttptt: tim-to-picture-to-tim by pav13, 2026</translation>
+    </message>
+    <message>
+        <location line="+9"/>
         <source>Features:
   * Support for 4/8/16/24-bit TIM
   * Multi-row CLUT, multiple images per group
@@ -1316,7 +1319,7 @@ https://github.com/pav1388/tim-to-picture-to-tim</translation>
        .PAL/.ACT/.GPL -&gt; import palette
        .TTPTT -&gt; open metadata
        other files -&gt; open as TIM or as raw TIM
-  * Log window (Settings menu)</source>
+  * Log window (Settings menu)  * Note: part of the code was generated or refined with the help of AI (DeepSeek)</source>
         <translation>Возможности:
   * Поддержка 4/8/16/24-битных TIM
   * Многострочные CLUT, несколько изображений в группе
@@ -1354,10 +1357,11 @@ https://github.com/pav1388/tim-to-picture-to-tim</translation>
        .PAL/.ACT/.GPL -&gt; импорт палитры,
        .TTPTT -&gt; открытие метаданных,
        остальные файлы -&gt; открытие как TIM или &quot;сырого&quot; TIM
-  * Журнал логов (меню Настройки)</translation>
+  * Журнал логов (меню Настройки)
+  * Примечание: часть кода была сгенерирована или доработана с использованием ИИ (DeepSeek)</translation>
     </message>
     <message>
-        <location line="+40"/>
+        <location line="+41"/>
         <source>Homage to TIMViewer 1.04b (rveach, 2004)</source>
         <translation>Оммаж программе TIMViewer 1.04b (rveach, 2004)</translation>
     </message>
@@ -1591,12 +1595,12 @@ https://github.com/pav1388/tim-to-picture-to-tim</translation>
     данных</translation>
     </message>
     <message>
-        <location line="+15"/>
+        <location line="+37"/>
         <source>About</source>
         <translation>О программе</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="+53"/>
         <source>Close</source>
         <translation>Закрыть</translation>
     </message>

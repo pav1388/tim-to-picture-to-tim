@@ -4,5 +4,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+
 class QWidget;
+class QDialog;
+
+QDialog *createAboutDialog(QWidget *parent);
+
 void showAboutDialog(QWidget *parent);

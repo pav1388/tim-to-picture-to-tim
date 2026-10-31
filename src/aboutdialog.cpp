@@ -5,27 +5,33 @@
 
 #include "aboutdialog.h"
 #include "mainwindow.h"
+
 #include <QCoreApplication>
 #include <QDialog>
-#include <QVBoxLayout>
-#include <QPlainTextEdit>
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QLabel>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStringList>
+#include <QVBoxLayout>
 
-// ---------------------------------------------------------------------------
-// Translation blocks. QT_TRANSLATE_NOOP is a no-op for the compiler (the
-// literal is returned unchanged), but lupdate recognizes it and picks the
-// string into the .ts file. QCoreApplication::translate() at the use site
-// then looks up the actual translation.
-//
-// lupdate in Qt 5.6.3 cannot parse C++11 raw string literals, so we use
-// adjacent regular literals (concatenated at compile time) instead.
-// ---------------------------------------------------------------------------
-static const char *kAboutHeader = QT_TRANSLATE_NOOP("aboutdialog",
-	"ttptt: tim-to-picture-to-tim by pav13(+DeepSeek), 2026\n"
+// --- Настройки модуля AboutDialog (префикс AD_) ---
+
+#define AD_DIALOG_WIDTH       640
+#define AD_DIALOG_HEIGHT      480
+#define AD_HEADER_ICON_SIZE   64
+
+#define AD_HOMEPAGE_URL       "https://github.com/pav1388/tim-to-picture-to-tim"
+
+static const char *kAboutTitle = QT_TRANSLATE_NOOP("aboutdialog",
+	"ttptt: tim-to-picture-to-tim by pav13, 2026"
+);
+
+static const char *kAboutSubtitle = QT_TRANSLATE_NOOP("aboutdialog",
 	"TIM <-> Picture converter for PlayStation 1.\n"
-	"https://github.com/pav1388/tim-to-picture-to-tim"
+	"License: GPL-3.0-or-later"
 );
 
 static const char *kAboutFeatures = QT_TRANSLATE_NOOP("aboutdialog",
@@ -66,6 +72,7 @@ static const char *kAboutFeatures = QT_TRANSLATE_NOOP("aboutdialog",
 	"       .TTPTT -> open metadata\n"
 	"       other files -> open as TIM or as raw TIM\n"
 	"  * Log window (Settings menu)"
+	"  * Note: part of the code was generated or refined with the help of AI (DeepSeek)"
 );
 
 static const char *kAboutHomage = QT_TRANSLATE_NOOP("aboutdialog",
@@ -193,18 +200,16 @@ static const char *kAboutNotes = QT_TRANSLATE_NOOP("aboutdialog",
 	"    without losing \"invisible\" data"
 );
 
-void showAboutDialog(QWidget *parent) {
-	QDialog dlg(parent);
-	dlg.setWindowTitle(QCoreApplication::translate("aboutdialog", "About"));
-	dlg.setWindowFlags(dlg.windowFlags() & ~Qt::WindowContextHelpButtonHint);
-	dlg.resize(640, 640);
+namespace {
 
-	auto *layout = new QVBoxLayout(&dlg);
-	auto *txt = new QPlainTextEdit(&dlg);
-	txt->setReadOnly(true);
+QIcon effectiveWindowIcon(QWidget *parent)
+{
+	return parent ? parent->windowIcon() : QIcon();
+}
 
-	const QString aboutText = QStringList{
-		QCoreApplication::translate("aboutdialog", kAboutHeader),
+QString buildAboutText()
+{
+	return QStringList{
 		QCoreApplication::translate("aboutdialog", kAboutFeatures),
 		QCoreApplication::translate("aboutdialog", kAboutHomage),
 		QCoreApplication::translate("aboutdialog", kAboutTimStructure),
@@ -212,14 +217,76 @@ void showAboutDialog(QWidget *parent) {
 		QCoreApplication::translate("aboutdialog", kAboutMetadata),
 		QCoreApplication::translate("aboutdialog", kAboutNotes),
 	}.join("\n\n");
+}
 
-	txt->setPlainText(aboutText);
+} // namespace
+
+QDialog *createAboutDialog(QWidget *parent)
+{
+	auto *dlg = new QDialog(parent);
+	dlg->setWindowTitle(QCoreApplication::translate("aboutdialog", "About"));
+	const QIcon appIcon = effectiveWindowIcon(parent);
+	dlg->setWindowIcon(appIcon);
+	dlg->setWindowFlags(dlg->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+	dlg->resize(AD_DIALOG_WIDTH, AD_DIALOG_HEIGHT);
+
+	auto *layout = new QVBoxLayout(dlg);
+
+	auto *headerRow = new QHBoxLayout();
+
+	auto *iconLabel = new QLabel(dlg);
+	if (!appIcon.isNull()) {
+		iconLabel->setPixmap(
+			appIcon.pixmap(AD_HEADER_ICON_SIZE, AD_HEADER_ICON_SIZE));
+		iconLabel->setFixedSize(AD_HEADER_ICON_SIZE, AD_HEADER_ICON_SIZE);
+		iconLabel->setAlignment(Qt::AlignCenter);
+	}
+	headerRow->addWidget(iconLabel, 0, Qt::AlignTop);
+
+	auto *headerColumn = new QVBoxLayout();
+
+	auto *titleLabel = new QLabel(dlg);
+	titleLabel->setTextFormat(Qt::RichText);
+	titleLabel->setWordWrap(true);
+	titleLabel->setText(QStringLiteral("<b>%1</b>").arg(
+		QCoreApplication::translate("aboutdialog", kAboutTitle)));
+	headerColumn->addWidget(titleLabel);
+
+	auto *subtitleLabel = new QLabel(dlg);
+	subtitleLabel->setWordWrap(true);
+	subtitleLabel->setText(
+		QCoreApplication::translate("aboutdialog", kAboutSubtitle));
+	headerColumn->addWidget(subtitleLabel);
+
+	auto *linkLabel = new QLabel(dlg);
+	linkLabel->setTextFormat(Qt::RichText);
+	linkLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+	linkLabel->setOpenExternalLinks(true);
+	linkLabel->setText(QStringLiteral("<a href=\"%1\">%1</a>")
+	                       .arg(QStringLiteral(AD_HOMEPAGE_URL)));
+	headerColumn->addWidget(linkLabel);
+
+	headerColumn->addStretch();
+	headerRow->addLayout(headerColumn, 1);
+	layout->addLayout(headerRow);
+
+	auto *txt = new QPlainTextEdit(dlg);
+	txt->setReadOnly(true);
+	txt->setPlainText(buildAboutText());
 	layout->addWidget(txt);
 
-	auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+	auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
 	if (auto *b = bb->button(QDialogButtonBox::Close))
 		b->setText(QCoreApplication::translate("aboutdialog", "Close"));
-	QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	QObject::connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
 	layout->addWidget(bb);
-	dlg.exec();
+
+	return dlg;
+}
+
+void showAboutDialog(QWidget *parent)
+{
+	QDialog *dlg = createAboutDialog(parent);
+	dlg->exec();
+	delete dlg;
 }
