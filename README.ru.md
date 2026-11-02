@@ -1,5 +1,7 @@
 # ttptt — tim-to-picture-to-tim
 
+[English](README.md) | [Русский](README.ru.md)
+
 Конвертер TIM <-> Изображение (PNG/BMP) для PlayStation 1.
 
 Автор: pav13, 2026.
