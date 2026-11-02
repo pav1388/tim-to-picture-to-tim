@@ -28,6 +28,7 @@ Makefile
 .vs/
 .idea/
 *.autosave
+*.qm
 
 # Runtime settings
 ttptt-settings.ini
