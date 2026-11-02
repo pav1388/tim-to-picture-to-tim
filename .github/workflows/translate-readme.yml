@@ -1,3 +1,4 @@
+
 name: Translate README to English
 
 on:
@@ -14,40 +15,65 @@ permissions:
 jobs:
   translate:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Translate Russian to English
-        uses: FidelusAleksander/ai-translate-action@v1
+        uses: FidelusAleksander/prompt-action@v2
         id: translate
         with:
-          text-file: README.ru.md
-          target-language: "English"
-          custom-instructions: "Keep technical terms in English. Don't translate code blocks, links, or image paths."
+          system-prompt: |
+            You are a professional technical documentation translator.
 
-      - name: Build English README with correct language switcher
-        run: |
-          # 1. Записать переведённый текст
-          echo "$TRANSLATED_TEXT" > README.md
-          
-          # 2. Создать правильную строку переключателя для английской версии
-          #    Текущий язык (English) выделен жирным, русский — ссылка
-          SWITCHER='**English** | [Русский](./README.ru.md)'
-          
-          # 3. Вставить переключатель в первую строку README.md
-          #    Используем временный файл, чтобы избежать проблем с экранированием sed
-          printf '%s\n\n' "$SWITCHER" > /tmp/readme_with_switcher.md
-          cat README.md >> /tmp/readme_with_switcher.md
-          mv /tmp/readme_with_switcher.md README.md
+            Translate the provided Russian README into English.
+
+            Rules:
+            - Keep technical terminology in English.
+            - Preserve the original Markdown structure.
+            - Do not translate fenced code blocks.
+            - Do not translate inline code.
+            - Preserve all URLs and link destinations.
+            - Preserve image paths and image references.
+            - Preserve HTML tags and GitHub-specific syntax.
+            - Preserve tables, badges and formatting.
+            - Do not modify commands, filenames or identifiers.
+            - Do not add explanations or comments.
+            - Do not summarize or omit any content.
+            - If a language switcher exists in the source,
+              omit it. It will be generated separately.
+            - Return only the translated README.
+
+          prompt-file: README.ru.md
+
+      - name: Build English README
+        shell: bash
         env:
-          TRANSLATED_TEXT: ${{ steps.translate.outputs.translated-text }}
+          TRANSLATED_TEXT: ${{ steps.translate.outputs.text }}
+        run: |
+          if [[ -z "${TRANSLATED_TEXT//[[:space:]]/}" ]]; then
+            echo "::error::Translation result is empty"
+            exit 1
+          fi
+
+          SWITCHER='[Русский](./README.ru.md) | **English**'
+
+          {
+            printf '%s\n\n' "$SWITCHER"
+            printf '%s\n' "$TRANSLATED_TEXT"
+          } > README.md
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           commit-message: "docs: auto-translate README.ru.md to README.md"
-          title: "Update English README (auto-translated)"
-          body: "Automatically translated from README.ru.md using ai-translate-action."
+          title: "docs: Update English README"
+          body: |
+            Automatically translated from README.ru.md
+            using GitHub Models.
+
+            Please review the translation before merging.
           branch: docs/update-english-readme
-          add-paths: "README.md"
+          add-paths: README.md
           delete-branch: true
