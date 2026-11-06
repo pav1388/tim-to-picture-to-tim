@@ -6,6 +6,7 @@ cd /d "%~dp0"
 for %%i in ("%~dp0..") do set "PROJECT_ROOT=%%~fi"
 set "SRC_EXE=%PROJECT_ROOT%\build\ttptt.exe"
 set "SRC_README=%PROJECT_ROOT%\README.md"
+set "SRC_README_RU=%PROJECT_ROOT%\README.ru.md"
 set "SRC_SAMPLES=%PROJECT_ROOT%\sample-tim"
 set "SRC_SAMPLES_ZIP=%SRC_SAMPLES%\sample-tim.zip"
 set "RELEASE_ROOT=%PROJECT_ROOT%\releases"
@@ -50,6 +51,13 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 echo [ok] README.md
+
+copy /Y "%SRC_README_RU%" "%DEST%\README.ru.md" >nul
+if errorlevel 1 (
+    echo ERROR: failed to copy README.ru.md
+    pause & exit /b 1
+)
+echo [ok] README.ru.md
 
 REM --- sample-tim (extract sample-tim.zip into release sample-tim) ---
 if exist "%SRC_SAMPLES%" (
