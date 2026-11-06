@@ -6,7 +6,7 @@ TIM <-> Image (PNG/BMP) converter for PlayStation 1.
 
 Author: pav13, 2026.
 
-Development: part of the code was prepared with the help of an AI assistant (DeepSeek).
+Development: part of the code was prepared with the help of an AI assistant.
 
 GitHub: https://github.com/pav1388/tim-to-picture-to-tim
 
