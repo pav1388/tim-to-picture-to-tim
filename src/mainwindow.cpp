@@ -284,13 +284,6 @@ void MainWindow::buildMenus() {
     vm->addSeparator();
     vm->addAction(tr("Scale 1:1"), this, &MainWindow::previewScale1to1, QKeySequence("Ctrl+1"));
     vm->addAction(tr("Fit to Window"), this, &MainWindow::previewScaleFit, QKeySequence("Ctrl+2"));
-    vm->addSeparator();
-    m_themeLightAction = vm->addAction(tr("Light Theme"), this, &MainWindow::setThemeLight);
-    m_themeLightAction->setCheckable(true);
-    m_themeLightAction->setChecked(!m_darkTheme);
-    m_themeDarkAction = vm->addAction(tr("Dark Theme"), this, &MainWindow::setThemeDark);
-    m_themeDarkAction->setCheckable(true);
-    m_themeDarkAction->setChecked(m_darkTheme);
 
     // ===== Settings =====
     auto *sm = mb->addMenu(tr("Settings"));
@@ -347,6 +340,13 @@ void MainWindow::buildMenus() {
     m_manualAllPalettesAction->setCheckable(true);
     m_manualAllPalettesAction->setChecked(m_saveAllPalettesAuto);
     connect(m_manualAllPalettesAction, &QAction::toggled, this, [this](bool v) { m_saveAllPalettesAuto = v; });
+    sm->addSeparator();
+    m_themeLightAction = sm->addAction(tr("Light Theme"), this, &MainWindow::setThemeLight);
+    m_themeLightAction->setCheckable(true);
+    m_themeLightAction->setChecked(!m_darkTheme);
+    m_themeDarkAction = sm->addAction(tr("Dark Theme"), this, &MainWindow::setThemeDark);
+    m_themeDarkAction->setCheckable(true);
+    m_themeDarkAction->setChecked(m_darkTheme);
 
     // ===== Help =====
     auto *hm = mb->addMenu(tr("Help"));
